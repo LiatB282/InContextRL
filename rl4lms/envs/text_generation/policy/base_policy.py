@@ -91,12 +91,16 @@ class GenerationOutputs:
     step_wise_logprobs: List[List[torch.tensor]]
     # actions at each time step
     step_wise_actions: List[torch.tensor]
-    # generated tokens
-    gen_tokens: List[List[int]]
     # generated texts
     gen_texts: List[str]
     # action masks
     action_masks: List[torch.tensor] = None
+    # The docs embeddings to consider
+    doc_embeds: List[torch.tensor]
+    # Input ids after each action
+    input_ids_list: List[torch.tensor]
+    # Chosen actions Doc IDS
+    doc_ids: List[torch.tensor]
 
 
 class LMActorCriticPolicy(BasePolicy):

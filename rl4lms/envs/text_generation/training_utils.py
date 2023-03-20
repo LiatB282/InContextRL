@@ -29,7 +29,11 @@ from rl4lms.envs.text_generation.utils_supervised import (get_datasets_for_causa
                                                            tokenize_seq2seq,
                                                            EvalCallack)
 from rl4lms.envs.text_generation.warm_start import TrainerWarmStartMixin
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from index_utils.retriever import DenseRetriever
 
 def build_tokenizer(tokenizer_config: Dict[str, Any]):
     tokenizer = AutoTokenizer.from_pretrained(
@@ -79,12 +83,14 @@ def build_datapool(datapool_config: Dict[str, Any]):
 def build_env(env_config: Dict[str, Any],
               reward_fn: RewardFunction,
               tokenizer: AutoTokenizer,
-              train_samples: List[Sample]):
+              train_samples: List[Sample],
+              retriever: DenseRetriever):
     # vectoried env
     env_kwargs = {
         "reward_function": reward_fn,
         "tokenizer": tokenizer,
         "samples": train_samples,
+        "retriever": retriever
     }
     env_kwargs = {**env_kwargs, **env_config.get("args", {})}
     env = make_vec_env(TextGenEnv,
@@ -99,7 +105,8 @@ def build_alg(alg_config: Dict[str, Any],
               env: TextGenEnv,
               tracker: Tracker,
               policy_state: Dict[str, Any],
-              alg_state: Dict[str, Any]):
+              alg_state: Dict[str, Any],
+              retriever: DenseRetriever = None):
     # TBD - move these to a registry once the experimentation is done
     # Also switch to Sb3 algos when possible with minimal code adaptations
     policy_config = alg_config["policy"]
@@ -118,7 +125,8 @@ def build_alg(alg_config: Dict[str, Any],
     alg = wrapper(alg_cls, alg_kwargs,
                   alg_config["kl_div"]["coeff"], tracker,
                   alg_config["kl_div"].get("target_kl", None),
-                  alg_config["kl_div"].get("norm_reward", False))
+                  alg_config["kl_div"].get("norm_reward", False), 
+                  retriever)
     alg.load_from_dict(alg_state)
     return alg
 
@@ -157,14 +165,17 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
         self._reward_fn = build_reward_fn(self._reward_config)
         self._metrics = build_metrics(
             self._train_eval_config.get("metrics", []))
+        self._retriever = DenseRetriever(ctx_files_pattern=self._datapool_config.encoded_dataset_path)
         self._samples_by_split = build_datapool(
             self._datapool_config)
         self._env = build_env(self._env_config, self._reward_fn,
-                              self._tokenizer, self._samples_by_split["train"])
+                              self._tokenizer, self._samples_by_split["train"],
+                              self._retriever)
         self._alg = build_alg(self._on_policy_alg_config,
                               self._env, self._tracker,
                               self._policy_state_dict,
-                              self._alg_state_dict)
+                              self._alg_state_dict,
+                              self._retriever)
 
         # extract train params
         self._max_episode_length = self._env_config["args"]["max_episode_length"]
@@ -189,12 +200,13 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
                                 epoch=epoch,
                                 split_name=split,
                                 tracker=self._tracker,
-                                gen_kwargs=self._eval_gen_kwargs)
+                                gen_kwargs=self._eval_gen_kwargs,
+                                retriever=self._retriever)
 
     def train_and_eval(self):
         # evaluate on val and test set before fine-tuning once
         iter_start = self._trainer_state["current_iter"]
-        self._evaluate_on_datapools(epoch=iter_start)
+        #self._evaluate_on_datapools(epoch=iter_start)
 
         # train for given number of iters
         for epoch in range(iter_start, self._n_iters):

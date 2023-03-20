@@ -30,7 +30,11 @@ from rl4lms.envs.text_generation.policy.base_policy import (
     EvaluateActionsOutput,
     GenerationOutputs,
 )
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from index_utils.retriever import DenseRetriever
 
 class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin):
     def __init__(
@@ -91,76 +95,246 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
                     self._value_head.to(self.device)
                 )
 
+    def generate_by_embeds(self,
+        tokenizer: AutoTokenizer,
+        texts: List[str],
+        query_ids: List[str],
+        max_prompt_queries_length: int,
+        input_ids: torch.tensor = None,
+        attention_mask: torch.tensor = None,
+        retriever: DenseRetriever = None):
+        
+        # TODO: add the eos / variable query length
+        batch_size = input_ids.shape[0]
+        used_ids = [[query_ids[i]] for i in range(batch_size)]
+        actions = [[] for i in range(batch_size)]
+        step_wise_logprobs = []
+        step_wise_actions = []
+        all_doc_embeds = []
+        all_doc_ids = []
+        max_top_queries = 100
+
+        decoder_input_ids = torch.tensor(tokenizer.pad_token_id).repeat(batch_size, 1).to(input_ids.device)
+        for step in range(max_prompt_queries_length):
+            outputs = self._policy_model(
+                input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids=decoder_input_ids, return_dict=True
+            )
+
+            last_hidden_state = outputs['last_hidden_state']
+            embeddings = torch.nn.functional.normalize(last_hidden_state, dim=1)
+            top_queries = retriever.get_top_docs(embeddings, max_top_queries + step) #TODO: check that they are ordered
+            rand_docs_vectors_list = []
+            rand_docs_ids_list = []
+            top_docs_ids_list = []
+            top_scores_list = []
+            top_docs_vectors_list = []
+            input_ids_list = []
+
+            for i in range(batch_size):
+                current_ids = used_ids[i]
+                current_text = texts[i]
+                current_scores = [q[i][1] for q in top_queries]
+                current_top_ids = [q[i][0][0] for q in top_queries]
+
+                counter = 0
+                for q in top_queries:
+                    id = q[i][0][0]
+                    if id in actions[i]:
+                        continue
+                    score = q[i][1]
+                    current_scores.append(score)
+                    current_top_ids.append(id)
+                    counter += 1
+                    if counter == max_top_queries:
+                        break
+
+                top_docs_ids_list.append(current_top_ids)
+                top_scores_list.append(current_scores)
+                for query_data, score in top_queries[i]:
+                    query_id, query_text, label = query_data
+                    if query_id not in current_ids:
+                        break
+                current_ids.append(query_id)
+                actions[i].append(query_id)
+                texts[i] = f"Input: {query_text}, Output: {label}"
+                #top_queries_ids = [q[0][0] for q in top_queries]
+                rand_docs_data_and_vectors = retriever.get_random_docs(20, current_ids + current_top_ids)
+                rand_docs_vectors_list.append([d[1] for d in rand_docs_data_and_vectors])
+                rand_docs_ids_list.append([d[0][0] for d in rand_docs_data_and_vectors])
+
+                top_docs_vectors_list.append([d[1] for d in rand_docs_data_and_vectors])
+                
+
+            rand_docs_tensor = torch.tensor(rand_docs_vectors_list, device=input_ids.device)
+            top_docs_tensor = torch.tensor(top_docs_vectors_list, device=input_ids.device)
+
+            # embeddings: n1 x D, rand_docs_tensor: n2 x D, result n1 x n2
+            rand_docs_scores = torch.matmul(embeddings, torch.transpose(rand_docs_tensor, 0, 1))
+
+            top_scores_tensor = torch.tensor(top_scores_list, device=input_ids.device)
+            all_scores = torch.cat([rand_docs_scores.unsqueeze(1), top_scores_tensor.unsqueeze(1)], dim=0)
+            all_actions = [l1 + l2 for l1, l2 in zip(rand_docs_ids_list, top_docs_ids_list)]
+            all_actions = torch.tensor(all_actions, device=input_ids.device)
+            all_vectors = torch.cat([rand_docs_tensor.unsqueeze(1), top_docs_tensor.unsqueeze(1)], dim=0)
+
+            encodings = tokenizer(
+                texts,
+                padding="max_length",
+                max_length=512,
+                return_tensors="pt",
+                return_attention_mask=True,
+                truncation=True,
+            )
+            
+            input_ids = encodings.input_ids
+            attention_mask = encodings.attention_mask    
+            input_ids_list.append(input_ids)   
+
+            all_logprobs = torch.softmax(all_scores, dim=1).tolist()
+            logprobs, actions = torch.max(all_logprobs, dim=1)
+            step_wise_logprobs.append(logprobs)
+            step_wise_actions.append(actions)
+            all_doc_ids.append(all_actions)
+            all_doc_embeds.append(all_vectors)
+
+        gen_output = GenerationOutputs(
+            step_wise_logprobs, step_wise_actions, texts, doc_ids=all_doc_ids, doc_embeds=all_doc_embeds, input_ids_list=input_ids_list
+        )
+        return gen_output
+
+    def generate(
+        self,
+        tokenizer: AutoTokenizer,
+        texts: List[str] = None,
+        max_prompt_length: int = None,
+        input_ids: torch.tensor = None,
+        attention_mask: torch.tensor = None,
+        gen_kwargs: Dict[str, Any] = None,
+        retriever: DenseRetriever = None
+    ) -> GenerationOutputs:
+
+        # if it different from rollout gen kwargs
+        if gen_kwargs is None:
+            gen_kwargs = self._generation_kwargs
+
+        # switch to eval
+        self._policy_model.eval()
+
+        if (
+            input_ids is None
+            and attention_mask is None
+            and texts is not None
+            and max_prompt_length is not None
+        ):
+            # override truncation side for prompt
+            prev_truncation_side = tokenizer.truncation_side
+            tokenizer.truncation_side = self._prompt_truncation_side
+            encodings = tokenizer(
+                texts,
+                padding="max_length",
+                max_length=max_prompt_length,
+                return_tensors="pt",
+                return_attention_mask=True,
+                truncation=True,
+            )
+            input_ids = encodings.input_ids
+            attention_mask = encodings.attention_mask
+            tokenizer.truncation_side = prev_truncation_side
+
+        # if min_length argument is set and if policy is not a seq2seq LM (ie. causal LM)
+        # then it has to be adjusted to input_size + min_length
+        if "min_length" in gen_kwargs.keys() and not self.is_encoder_decoder(
+            self._policy_model
+        ):
+            generation_kwargs_ = deepcopy(gen_kwargs)
+            generation_kwargs_["min_length"] = (
+                input_ids.shape[1] + gen_kwargs["min_length"]
+            )
+        else:
+            generation_kwargs_ = gen_kwargs
+        
+        return self.generate_by_embeds(tokenizer, texts, max_prompt_length, input_ids, attention_mask, gen_kwargs, retriever)
+
     def forward_policy(
         self,
         obs: TensorDict,
         actions: torch.tensor,
-        past_model_kwargs: Optional[Dict[str, torch.tensor]] = None,
+        input_ids: torch.tensor,
+        doc_embeds: torch.tensor,
+        past_model_kwargs: Optional[Dict[str, torch.tensor]] = None
     ) -> PolicyOutput:
 
         # Temp workaround for Seq2seq policy
-        past_model_kwargs = None
+        # past_model_kwargs = None
 
-        if past_model_kwargs is None:
-            # 1. prepare model inputs
-            past_model_kwargs = {
-                "attention_mask": obs["prompt_or_input_attention_mask_pt"],
-            }
-            inputs_tensor, model_input_name, past_model_kwargs = unwrap_model(
-                self._policy_model
-            )._prepare_model_inputs(
-                obs["prompt_or_input_encoded_pt"].int(), None, past_model_kwargs
-            )
+        # if past_model_kwargs is None:
+        #     # 1. prepare model inputs
+        #     past_model_kwargs = {
+        #         "attention_mask": obs["prompt_or_input_attention_mask_pt"],
+        #     }
+        #     inputs_tensor, model_input_name, past_model_kwargs = unwrap_model(
+        #         self._policy_model
+        #     )._prepare_model_inputs(
+        #         obs["prompt_or_input_encoded_pt"].int(), None, past_model_kwargs
+        #     )
 
-            # 2. prepare encoder outputs
-            past_model_kwargs = unwrap_model(
-                self._policy_model
-            )._prepare_encoder_decoder_kwargs_for_generation(
-                inputs_tensor, past_model_kwargs, model_input_name
-            )
+        #     # 2. prepare encoder outputs
+        #     past_model_kwargs = unwrap_model(
+        #         self._policy_model
+        #     )._prepare_encoder_decoder_kwargs_for_generation(
+        #         inputs_tensor, past_model_kwargs, model_input_name
+        #     )
 
-            # 3. Prepare input_ids for auto-regressive generation
-            input_ids = obs["context_encoded_pt"].int()
-            decoder_attn_mask = obs["context_attention_mask_pt"]
-        else:
-            input_ids = obs["context_encoded_pt"].int()
-            decoder_attn_mask = past_model_kwargs.pop("decoder_attention_mask")
+        #     # 3. Prepare input_ids for auto-regressive generation
+        #     input_ids = obs["context_encoded_pt"].int()
+        #     decoder_attn_mask = obs["context_attention_mask_pt"]
+        # else:
+        #     input_ids = obs["context_encoded_pt"].int()
+        #     decoder_attn_mask = past_model_kwargs.pop("decoder_attention_mask")
 
+         
         # all set to get into auto-regressive mode
         # prepare all of the model inputs for the decoder
-        batch_size = input_ids.shape[0]
-        model_inputs = unwrap_model(self._policy_model).prepare_inputs_for_generation(
-            input_ids, **past_model_kwargs
-        )
+        # batch_size = input_ids.shape[0]
+        # model_inputs = unwrap_model(self._policy_model).prepare_inputs_for_generation(
+        #     input_ids, **past_model_kwargs
+        # )
 
+        # attention_mask = input_ids != 0
+        
         # and forward pass to get next token logits
         outputs = self._policy_model(
-            **model_inputs, decoder_attention_mask=decoder_attn_mask, return_dict=True
+            input_ids=obs["prompt_or_input_encoded_pt"].int(), attention_mask=obs["prompt_or_input_attention_mask_pt"], return_dict=True
         )
-        next_token_logits = outputs.logits[:, -1, :]
+
+        last_hidden_state = outputs['last_hidden_state']
+        embeddings = torch.nn.functional.normalize(last_hidden_state, dim=1)
+        
+        # embeddings: n1 x D, rand_docs_tensor: n2 x D, result n1 x n2
+        scores = torch.matmul(embeddings, torch.transpose(doc_embeds, 0, 1))
 
         # get log probs
-        dist = self._action_dist.proba_distribution(action_logits=next_token_logits)
+        dist = self._action_dist.proba_distribution(action_logits=scores)
         log_prob = dist.log_prob(actions)
         entropy = dist.entropy()
 
         # update the model kwargs for further generation
-        past_model_kwargs = unwrap_model(
-            self._policy_model
-        )._update_model_kwargs_for_generation(
-            outputs,
-            past_model_kwargs,
-            is_encoder_decoder=unwrap_model(
-                self._policy_model
-            ).config.is_encoder_decoder,
-        )
-        past_model_kwargs["decoder_attention_mask"] = torch.cat(
-            (decoder_attn_mask, torch.ones(batch_size, 1).to(decoder_attn_mask.device)),
-            dim=-1,
-        )
+        # past_model_kwargs = unwrap_model(
+        #     self._policy_model
+        # )._update_model_kwargs_for_generation(
+        #     outputs,
+        #     past_model_kwargs,
+        #     is_encoder_decoder=unwrap_model(
+        #         self._policy_model
+        #     ).config.is_encoder_decoder,
+        # )
+        # past_model_kwargs["decoder_attention_mask"] = torch.cat(
+        #     (decoder_attn_mask, torch.ones(batch_size, 1).to(decoder_attn_mask.device)),
+        #     dim=-1,
+        # )
 
         policy_output = PolicyOutput(
-            actions, log_prob, log_prob, entropy, past_model_kwargs
+            actions, log_prob, log_prob, entropy#, past_model_kwargs
         )
 
         return policy_output
@@ -260,7 +434,8 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         self,
         obs: TensorDict,
         action: torch.tensor,
-        model_kwarpast_model_kwargsgs: Dict[str, Any] = None,
+        doc_embeds: torch.tensor,
+        model_kwarpast_model_kwargsgs: Dict[str, Any] = None
     ) -> RefPolicyOutput:
         # Temp workaround for Seq2seq policy
         past_model_kwargs = None
@@ -301,10 +476,14 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         outputs = self._ref_model(
             **model_inputs, decoder_attention_mask=decoder_attn_mask, return_dict=True
         )
-        next_token_logits = outputs.logits[:, -1, :]
+        last_hidden_state = outputs['last_hidden_state']
+        embeddings = torch.nn.functional.normalize(last_hidden_state, dim=1)
+        
+        # embeddings: n1 x D, rand_docs_tensor: n2 x D, result n1 x n2
+        scores = torch.matmul(embeddings, torch.transpose(doc_embeds, 0, 1))
 
         # get log probs
-        dist = self._action_dist.proba_distribution(action_logits=next_token_logits)
+        dist = self._action_dist.proba_distribution(action_logits=scores)
         log_prob = dist.log_prob(action)
 
         # update the model kwargs for further generation

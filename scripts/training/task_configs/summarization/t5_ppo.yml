@@ -40,7 +40,7 @@ alg:
     id: seq2seq_lm_actor_critic_policy
     args:
       model_name: t5-base
-      apply_model_parallel: True
+      apply_model_parallel: False
       prompt_truncation_side: "right"
       generation_kwargs:
         do_sample: True

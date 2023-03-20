@@ -10,7 +10,11 @@ from rl4lms.envs.text_generation.reward import BatchedRewardFunction, RewardFunc
 from rl4lms.envs.text_generation.observation import Observation
 from transformers import AutoTokenizer
 from rl4lms.core_components.sampler import PrioritySampler
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from index_utils.retriever import DenseRetriever
 
 class TextGenEnv(Env):
     def __init__(
@@ -24,6 +28,7 @@ class TextGenEnv(Env):
         terminate_on_eos: bool = False,
         context_start_token: Optional[int] = None,
         prompt_truncation_side: str = "left",
+        retriever: DenseRetriever = None
     ):
         """
         A generic RL environment to generate textual sequences.
@@ -48,6 +53,7 @@ class TextGenEnv(Env):
         self._terminate_on_eos = terminate_on_eos
         self._context_start_token = context_start_token
         self._prompt_truncation_side = prompt_truncation_side
+        self._retriever = retriever
         super().__init__()
 
         # set the observation and action space here
@@ -108,13 +114,13 @@ class TextGenEnv(Env):
         previous_obs = self.__current_obs
 
         # just update the context tensor and gets the new observation
-        self.__current_obs = self.__current_obs.update(action, self.tokenizer)
+        self.__current_obs = self.__current_obs.update(action, self.tokenizer, self._retriever)
 
         # decide if the episode is finished or not
-        done = (action == self.tokenizer.eos_token_id and self._terminate_on_eos) or (
+        # TODO: fix this
+        done = (action == -1) or (
             self.__time_step == self.max_steps
         )
-
         # compute reward
         if not isinstance(self.reward_function, BatchedRewardFunction):
             reward = (

@@ -7,6 +7,7 @@ from transformers import AutoTokenizer
 from rl4lms.data_pools.custom_text_generation_pools import Sample
 from rl4lms.envs.text_generation.logging_utils import Tracker
 from rl4lms.envs.text_generation.metric import BaseMetric
+from index_utils.retriever import DenseRetriever
 
 
 def get_batch(samples: List[Sample], batch_size: int):
@@ -30,6 +31,7 @@ def evaluate_on_samples(
     tracker: Tracker = None,
     dt_control_token: str = "",
     gen_kwargs: Dict[str, Any] = None,
+    retriever: DenseRetriever = None
 ):
     # generate text by batch
     all_generated_texts = []
@@ -39,7 +41,7 @@ def evaluate_on_samples(
     n_samples = len(samples)
     for batch in tqdm(list(get_batch(samples, batch_size)), desc="Evaluating"):
         batch_generated_texts = generate_text(
-            policy, tokenizer, batch, max_prompt_length, dt_control_token, gen_kwargs
+            policy, tokenizer, batch, max_prompt_length, dt_control_token, gen_kwargs, retriever
         )
         batch_ref_texts = [sample.references for sample in batch]
         batch_prompt_texts = [sample.prompt_or_input_text for sample in batch]
@@ -104,11 +106,12 @@ def generate_text(
     max_prompt_length: int,
     dt_control_token: str,
     gen_kwargs: Dict[str, Any],
+    retriever: DenseRetriever
 ):
     prompt_texts = [
         dt_control_token + sample.prompt_or_input_text for sample in samples
     ]
     generated_texts = policy.generate(
-        tokenizer, prompt_texts, max_prompt_length, gen_kwargs=gen_kwargs
+        tokenizer, prompt_texts, max_prompt_length, gen_kwargs=gen_kwargs, retriever=retriever
     ).gen_texts
     return generated_texts

@@ -21,7 +21,11 @@ from rl4lms.envs.text_generation.policy.base_policy import (
 )
 from rl4lms.envs.text_generation.reward import BatchedRewardFunction, RewardFunction
 from rl4lms.envs.text_generation.warm_start import OnPolicyWarmStartMixin
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from index_utils.retriever import DenseRetriever
 
 @dataclass
 class TransitionInfo:
@@ -94,6 +98,7 @@ def wrap_onpolicy_alg(
     tracker: Tracker,
     target_kl: float = None,
     norm_reward: bool = False,
+    retriever: DenseRetriever = None
 ):
     class OnPolicyAlgText(alg_class, OnPolicyWarmStartMixin):
         def __init__(
@@ -103,6 +108,7 @@ def wrap_onpolicy_alg(
             tracker: Tracker,
             target_kl: float = None,
             norm_reward: bool = False,
+            retriever: DenseRetriever = None
         ):
             alg_kwargs["tracker"] = tracker
             super().__init__(**alg_kwargs)
@@ -120,6 +126,7 @@ def wrap_onpolicy_alg(
                 n_envs=1,
             )
             self.reward_fn = self.env.get_attr("reward_function", 0)[0]
+            self._retriever = retriever
 
         def get_policy_kwargs(
             self,
@@ -127,11 +134,15 @@ def wrap_onpolicy_alg(
             action: torch.tensor,
             past_state: Dict[str, torch.tensor],
             action_mask: torch.tensor,
+            embeds: torch.tensor,
+            input_ids: torch.tensor
         ):
 
             policy_kwargs = {
                 "obs": obs,
                 "actions": action,
+                "input_ids": input_ids,
+                "embeds": embeds,
                 "past_model_kwargs": past_state,
             }
             if action_mask is not None:
@@ -160,6 +171,7 @@ def wrap_onpolicy_alg(
                 input_ids=generation_inputs.inputs,
                 attention_mask=generation_inputs.attention_masks,
                 tokenizer=tokenizer,
+                retriever=self._retriever
             )
 
             # process them one step at a time to collect rollout info
@@ -174,8 +186,8 @@ def wrap_onpolicy_alg(
                 else [None] * len(gen_output.step_wise_logprobs)
             )
 
-            for actions_tensor, _, action_mask in zip(
-                gen_output.step_wise_actions, gen_output.step_wise_logprobs, masks
+            for actions_tensor, _, action_mask, embeds, input_ids, doc_ids in zip(
+                gen_output.step_wise_actions, gen_output.step_wise_logprobs, masks, gen_output.doc_embeds, gen_output.input_ids_list, gen_output.doc_ids
             ):
                 # if all episodes are done, just break and do not continue
                 if np.all(ep_terminated):
@@ -187,7 +199,7 @@ def wrap_onpolicy_alg(
 
                     # get log probs (TBD: generalize this a bit)
                     policy_kwargs = self.get_policy_kwargs(
-                        obs_tensor, actions_tensor, policy_past_state, action_mask
+                        obs_tensor, actions_tensor, policy_past_state, action_mask, embeds, input_ids
                     )
 
                     policy_outputs: PolicyOutput = self.policy.forward_policy(
@@ -221,7 +233,7 @@ def wrap_onpolicy_alg(
                     # get reference log probs
                     ref_policy_outputs: RefPolicyOutput = (
                         self.policy.get_log_probs_ref_model(
-                            obs_tensor, actions_tensor, ref_past_state
+                            obs_tensor, actions_tensor, embeds, ref_past_state
                         )
                     )
                     ref_log_probs, ref_past_state = (
@@ -239,8 +251,8 @@ def wrap_onpolicy_alg(
                     kl_rewards = -1 * self._kl_controller.kl_coeff * kl_div
 
                 # step into env to get rewards
-                actions = actions_tensor.cpu().numpy()
-                new_obs, rewards, dones, infos = self.env.step(actions)
+                doc_ids = doc_ids.cpu().numpy()
+                new_obs, rewards, dones, infos = self.env.step(doc_ids)
 
                 self.num_timesteps += self.env.num_envs
 
@@ -404,5 +416,5 @@ def wrap_onpolicy_alg(
             return True
 
     # instantiate the wrapped alg
-    alg = OnPolicyAlgText(alg_kwargs, kl_coeff, tracker, target_kl, norm_reward)
+    alg = OnPolicyAlgText(alg_kwargs, kl_coeff, tracker, target_kl, norm_reward, retriever)
     return alg

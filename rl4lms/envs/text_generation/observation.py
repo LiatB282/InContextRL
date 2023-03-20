@@ -5,6 +5,10 @@ import torch
 from transformers import AutoTokenizer
 from rl4lms.data_pools.text_generation_pool import Sample
 from copy import deepcopy
+import os, sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from index_utils.retriever import DenseRetriever
 
 
 @dataclass
@@ -69,7 +73,7 @@ class Observation:
                           actual_size:] = 1
         return concatenated, concatenated_mask
 
-    def update(self, action: int, tokenizer: AutoTokenizer) -> "Observation":
+    def update(self, action: int, tokenizer: AutoTokenizer, retriver: DenseRetriever) -> "Observation":
         """
         Updates the observation using the given action
         """
@@ -79,36 +83,41 @@ class Observation:
         current_action_history.append(tokenizer._convert_id_to_token(action))
 
         # get the current context
-        current_context = deepcopy(self.context_encoded_pt)
-        current_context_attention_mask = deepcopy(
-            self.context_attention_mask_pt)
+        current_prompt = deepcopy(self.prompt_or_input_encoded_pt)
+        # current_context_attention_mask = deepcopy(
+        #     self.context_attention_mask_pt)
+        
+        input_ids = retriver.get_input_ids_from_docs_id(action) + [1713]
+        input_ids = torch.tensor(input_ids)
+        current_prompt = torch.cat(input_ids, current_prompt, dim=1)
+        current_prompt_attention_mask = current_prompt != tokenizer.pad_token_id
 
-        # just shift the context (also the attention mask) to left by 1
-        current_context[:, 0:-1] = current_context[:, 1:].clone()
-        current_context_attention_mask[:, 0:-
-                                       1] = current_context_attention_mask[:, 1:].clone()
+        # # just shift the context (also the attention mask) to left by 1
+        # current_context[:, 0:-1] = current_context[:, 1:].clone()
+        # current_context_attention_mask[:, 0:-
+        #                                1] = current_context_attention_mask[:, 1:].clone()
 
-        # add the action always at the end (assumes left padding)
-        current_context[:, -1] = action
-        current_context_attention_mask[:, -1] = 1
+        # # add the action always at the end (assumes left padding)
+        # current_context[:, -1] = action
+        # current_context_attention_mask[:, -1] = 1
 
         # decode the context
-        context_text = tokenizer.decode(
-            current_context.flatten(), skip_special_tokens=True)
+        prompt_text = tokenizer.decode(
+            current_prompt.flatten(), skip_special_tokens=True)
 
         # concatenate and still keep the left padding
         input_encoded_pt, input_attention_mask_pt = Observation._concat(
-            self.prompt_or_input_encoded_pt, self.prompt_or_input_attention_mask_pt,
-            current_context, current_context_attention_mask,
+            current_prompt, current_prompt_attention_mask,
+            self.context_encoded_pt, self.context_attention_mask_pt,
             tokenizer.pad_token_id)
 
         # and create a new observation
-        obs = Observation(self.prompt_or_input_encoded_pt,
-                          self.prompt_or_input_attention_mask_pt,
-                          self.prompt_or_input_text,
-                          current_context,
-                          current_context_attention_mask,
-                          context_text,
+        obs = Observation(current_prompt,
+                          current_prompt_attention_mask,
+                          prompt_text,
+                          self.context_encoded_pt,
+                          self.context_attention_mask_pt,
+                          self.context_text,
                           self.target_or_reference_texts,
                           input_encoded_pt,
                           input_attention_mask_pt,
