@@ -66,7 +66,7 @@ def gen_ctx_vectors(
     for j, batch_start in enumerate(range(0, n, batch_size)):
         batch_indices = sorted_indices[batch_start : batch_start + batch_size]
         batch_rows = [ctx_rows[ind] for ind in batch_indices]
-        batch_ids, batch_inputs, labels = zip(*batch_rows)
+        batch_ids, batch_inputs = zip(*batch_rows)
         batch_ids = list(batch_ids)
 
         out = torch.nn.functional.normalize(model.encode(batch_inputs), dim=1) 
@@ -78,7 +78,7 @@ def gen_ctx_vectors(
 
         for i, ind in enumerate(batch_indices):
             assert results[ind] is None
-            results[ind] = ((batch_ids[i], batch_inputs[i], labels[i]), out[i].view(-1).numpy())
+            results[ind] = ((batch_ids[i], batch_inputs[i]), out[i].view(-1).numpy())
 
         if total % 10 == 0:
             logger.info(f"Encoded {total} passages, took {time.time()-start_time:.1f} seconds")
