@@ -117,8 +117,8 @@ class TextGenEnv(Env):
         self.__current_obs = self.__current_obs.update(action, self.tokenizer, self._retriever)
 
         # decide if the episode is finished or not
-        # TODO: fix this
-        done = (action == -1) or (
+        # Assuming that the stop action is doc_id = 0
+        done = (action == 0) or (
             self.__time_step == self.max_steps
         )
         # compute reward

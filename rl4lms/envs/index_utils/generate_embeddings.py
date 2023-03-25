@@ -56,7 +56,7 @@ def gen_ctx_vectors(
 ) -> List[Tuple[object, np.array]]:
     n = len(ctx_rows)
     total = 0
-    results = [None] * n
+    results = [None] * (n + 1)
 
     logger.info("Sorting contexts")
     sorted_indices = list(reversed(np.argsort([len(ctx) for _, ctx, _ in ctx_rows])))
@@ -82,6 +82,9 @@ def gen_ctx_vectors(
 
         if total % 10 == 0:
             logger.info(f"Encoded {total} passages, took {time.time()-start_time:.1f} seconds")
+
+    # Adding the ending action
+    results[n] = ((0, np.array(batch_inputs[i].shape)), np.zeros(768))
 
     logger.info(f"Done. Took {(time.time()-start_time)/60:.1f} minutes")
 
