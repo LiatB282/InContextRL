@@ -2,6 +2,7 @@ import random
 from abc import abstractclassmethod
 from dataclasses import dataclass
 from typing import Any, List, Dict
+from datasets import load_dataset
 
 
 @dataclass(init=True)
@@ -45,3 +46,17 @@ class TextGenPool:
             pools.append(type(self)(self._samples[start_ix: end_ix]))
             start_ix = end_ix
         return pools
+
+
+class TriviaQAPool(TextGenPool):
+    @classmethod
+    def prepare(cls, split: str):
+        samples = load_dataset('trivia_qa', 'rc', split='train')
+        for ix, item in enumerate(samples):
+            sample = Sample(id=f"{split}_{ix}",
+                            prompt_or_input_text=item['question'],
+                            references=list(set([item['answer']['value']] + item['answer']['aliases']))
+                            )
+            samples.append(sample)
+        pool_instance = cls(samples)
+        return pool_instance
