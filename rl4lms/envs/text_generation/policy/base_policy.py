@@ -97,8 +97,6 @@ class GenerationOutputs:
     action_masks: List[torch.tensor] = None
     # The docs embeddings to consider
     doc_embeds: List[torch.tensor]
-    # Input ids after each action
-    input_ids_list: List[torch.tensor]
     # Chosen actions Doc IDS
     doc_ids: List[torch.tensor]
 

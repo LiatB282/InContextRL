@@ -104,18 +104,22 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         attention_mask: torch.tensor = None,
         retriever: DenseRetriever = None):
         
-        # TODO: add the eos / variable query length
         batch_size = input_ids.shape[0]
         used_ids = [[query_ids[i]] for i in range(batch_size)]
-        actions = [[] for i in range(batch_size)]
+        actions = [[] for _ in range(batch_size)]
         step_wise_logprobs = []
         step_wise_actions = []
         all_doc_embeds = []
         all_doc_ids = []
+        finished = [False for _ in range(batch_size)]
+        finished_counter = 0
         max_top_queries = 100
 
         decoder_input_ids = torch.tensor(tokenizer.pad_token_id).repeat(batch_size, 1).to(input_ids.device)
         for step in range(max_prompt_queries_length):
+            if finished_counter == batch_size:
+                break
+
             outputs = self._policy_model(
                 input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids=decoder_input_ids, return_dict=True
             )
@@ -131,12 +135,16 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
             input_ids_list = []
 
             for i in range(batch_size):
+                if top_queries[0][0][0] == 0 and not finished[i]:
+                    finished[i] = True
+                    finished_counter += 1
+
                 current_ids = used_ids[i]
-                current_text = texts[i]
                 current_scores = [q[i][1] for q in top_queries]
                 current_top_ids = [q[i][0][0] for q in top_queries]
 
                 counter = 0
+
                 for q in top_queries:
                     id = q[i][0][0]
                     if id in actions[i]:
@@ -151,19 +159,22 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
                 top_docs_ids_list.append(current_top_ids)
                 top_scores_list.append(current_scores)
                 for query_data, score in top_queries[i]:
-                    query_id, query_text, label = query_data
+                    query_id, query_input_ids = query_data
                     if query_id not in current_ids:
                         break
-                current_ids.append(query_id)
                 actions[i].append(query_id)
-                texts[i] = f"Input: {query_text}, Output: {label}"
-                #top_queries_ids = [q[0][0] for q in top_queries]
-                rand_docs_data_and_vectors = retriever.get_random_docs(20, current_ids + current_top_ids)
+                
+                if not finished[i]:
+                    current_ids.append(query_id)
+                    #TODO: check this makes sense
+                    new_input_ids = torch.cat(query_input_ids, input_ids[i], dim=1)
+                    input_ids_list.append(new_input_ids)  
+
+
+                rand_docs_data_and_vectors = retriever.get_random_docs(100, current_ids + current_top_ids)
                 rand_docs_vectors_list.append([d[1] for d in rand_docs_data_and_vectors])
                 rand_docs_ids_list.append([d[0][0] for d in rand_docs_data_and_vectors])
-
                 top_docs_vectors_list.append([d[1] for d in rand_docs_data_and_vectors])
-                
 
             rand_docs_tensor = torch.tensor(rand_docs_vectors_list, device=input_ids.device)
             top_docs_tensor = torch.tensor(top_docs_vectors_list, device=input_ids.device)
@@ -177,18 +188,8 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
             all_actions = torch.tensor(all_actions, device=input_ids.device)
             all_vectors = torch.cat([rand_docs_tensor.unsqueeze(1), top_docs_tensor.unsqueeze(1)], dim=0)
 
-            encodings = tokenizer(
-                texts,
-                padding="max_length",
-                max_length=512,
-                return_tensors="pt",
-                return_attention_mask=True,
-                truncation=True,
-            )
-            
-            input_ids = encodings.input_ids
-            attention_mask = encodings.attention_mask    
-            input_ids_list.append(input_ids)   
+            attention_mask = input_ids != tokenizer.pad_token_id    
+            input_ids = torch.tensor(input_ids_list)
 
             all_logprobs = torch.softmax(all_scores, dim=1).tolist()
             logprobs, actions = torch.max(all_logprobs, dim=1)
@@ -197,8 +198,10 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
             all_doc_ids.append(all_actions)
             all_doc_embeds.append(all_vectors)
 
+        texts = tokenizer.decode(input_ids_list, add_special_tokens=False)
+
         gen_output = GenerationOutputs(
-            step_wise_logprobs, step_wise_actions, texts, doc_ids=all_doc_ids, doc_embeds=all_doc_embeds, input_ids_list=input_ids_list
+            step_wise_logprobs, step_wise_actions, texts, doc_ids=all_doc_ids, doc_embeds=all_doc_embeds
         )
         return gen_output
 
@@ -259,7 +262,6 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         self,
         obs: TensorDict,
         actions: torch.tensor,
-        input_ids: torch.tensor,
         doc_embeds: torch.tensor,
         past_model_kwargs: Optional[Dict[str, torch.tensor]] = None
     ) -> PolicyOutput:

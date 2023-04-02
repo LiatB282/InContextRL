@@ -135,13 +135,11 @@ def wrap_onpolicy_alg(
             past_state: Dict[str, torch.tensor],
             action_mask: torch.tensor,
             embeds: torch.tensor,
-            input_ids: torch.tensor
         ):
 
             policy_kwargs = {
                 "obs": obs,
                 "actions": action,
-                "input_ids": input_ids,
                 "embeds": embeds,
                 "past_model_kwargs": past_state,
             }
@@ -199,7 +197,7 @@ def wrap_onpolicy_alg(
 
                     # get log probs (TBD: generalize this a bit)
                     policy_kwargs = self.get_policy_kwargs(
-                        obs_tensor, actions_tensor, policy_past_state, action_mask, embeds, input_ids
+                        obs_tensor, actions_tensor, policy_past_state, action_mask, embeds
                     )
 
                     policy_outputs: PolicyOutput = self.policy.forward_policy(
