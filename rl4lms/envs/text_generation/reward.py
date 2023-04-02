@@ -18,6 +18,9 @@ from rl4lms.envs.text_generation.metric import (
 )
 import numpy as np
 from typing import List, Dict, Any
+import math
+from rl4lms.qa_models.general_qa_model import GeneralQAModel
+from rl4lms.qa_models.evaluation import check_answer_truthfulness
 
 
 class RewardFunction(ABC):
@@ -605,6 +608,30 @@ class IntentAccuracy(BatchedRewardFunction):
         )["intent/accuracy"][0]
         rewards[done_ixs] += self._intent_coeff * np.array(scores)
         return rewards.tolist()
+
+
+class OurRewardFunction(RewardFunction):
+    def __call__(
+        self,
+        current_observation: Observation,
+        action: int,
+        next_observation: Observation,
+        done: bool,
+        meta_info: Dict[str, Any] = None,
+    ) -> float:
+        curr_prompt_text = next_observation.prompt_or_input_text
+        if done:
+            qa_model = meta_info['model']
+            model_answer = qa_model.generate_answer(curr_prompt_text)
+            gold_answers = meta_info['answers']
+            if check_answer_truthfulness(model_answer, gold_answers):
+                return 1
+
+        else:
+            number_of_incontext_examples = current_observation.count('question:') - 1
+            return -math.pow(0.5, number_of_incontext_examples + 1)
+
+        return 0
 
 
 if __name__ == "__main__":
