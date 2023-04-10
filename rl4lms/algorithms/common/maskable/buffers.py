@@ -22,6 +22,7 @@ class MaskableRolloutBufferSamples(NamedTuple):
     advantages: th.Tensor
     returns: th.Tensor
     action_masks: th.Tensor
+    embeds: th.Tensor
 
 
 class MaskableDictRolloutBufferSamples(MaskableRolloutBufferSamples):
@@ -32,6 +33,7 @@ class MaskableDictRolloutBufferSamples(MaskableRolloutBufferSamples):
     advantages: th.Tensor
     returns: th.Tensor
     action_masks: th.Tensor
+    embeds: th.Tensor
 
 
 class MaskableRolloutBuffer(RolloutBuffer):
@@ -50,6 +52,7 @@ class MaskableRolloutBuffer(RolloutBuffer):
 
     def __init__(self, *args, **kwargs):
         self.action_masks = None
+        self.embeds = None
         super().__init__(*args, **kwargs)
 
     def reset(self) -> None:
@@ -66,16 +69,21 @@ class MaskableRolloutBuffer(RolloutBuffer):
         self.mask_dims = mask_dims
         self.action_masks = np.ones(
             (self.buffer_size, self.n_envs, self.mask_dims), dtype=np.float32)
+        self.self.embeds = np.ones(
+            (self.buffer_size, self.n_envs, 768*200), dtype=np.float32)
 
         super().reset()
 
-    def add(self, *args, action_masks: Optional[np.ndarray] = None, **kwargs) -> None:
+    def add(self, *args, embeds: Optional[np.ndarray] = None, action_masks: Optional[np.ndarray] = None, **kwargs) -> None:
         """
         :param action_masks: Masks applied to constrain the choice of possible actions.
         """
         if action_masks is not None:
             self.action_masks[self.pos] = action_masks.reshape(
                 (self.n_envs, self.mask_dims))
+            
+        self.embeds[self.pos] = embeds.reshape(
+                (self.n_envs, -1))
 
         super().add(*args, **kwargs)
 
@@ -92,6 +100,7 @@ class MaskableRolloutBuffer(RolloutBuffer):
                 "advantages",
                 "returns",
                 "action_masks",
+                "embeds"
             ]:
                 self.__dict__[tensor] = self.swap_and_flatten(
                     self.__dict__[tensor])
@@ -115,6 +124,7 @@ class MaskableRolloutBuffer(RolloutBuffer):
             self.advantages[batch_inds].flatten(),
             self.returns[batch_inds].flatten(),
             self.action_masks[batch_inds].reshape(-1, self.mask_dims),
+            self.embeds[batch_inds].reshape(-1, 768*200),
         )
         return MaskableRolloutBufferSamples(*map(self.to_torch, data))
 
@@ -155,6 +165,7 @@ class MaskableDictRolloutBuffer(DictRolloutBuffer):
         n_envs: int = 1,
     ):
         self.action_masks = None
+        self.embeds = None
         super().__init__(buffer_size, observation_space,
                          action_space, device, gae_lambda, gamma, n_envs=n_envs)
 
@@ -172,16 +183,21 @@ class MaskableDictRolloutBuffer(DictRolloutBuffer):
         self.mask_dims = mask_dims
         self.action_masks = np.ones(
             (self.buffer_size, self.n_envs, self.mask_dims))  # .to(self.device)
+        self.embeds = np.ones(
+            (self.buffer_size, self.n_envs, 768*200))
 
         super().reset()
 
-    def add(self, *args, action_masks: Optional[torch.Tensor] = None, **kwargs) -> None:
+    def add(self, *args, embeds: Optional[torch.Tensor] = None, action_masks: Optional[torch.Tensor] = None, **kwargs) -> None:
         """
         :param action_masks: Masks applied to constrain the choice of possible actions.
         """
         if action_masks is not None:
             self.action_masks[self.pos] = action_masks.reshape(
                 (self.n_envs, self.mask_dims))
+            
+        self.embeds[self.pos] = embeds.reshape(
+                (self.n_envs, -1))
 
         super().add(*args, **kwargs)
 
@@ -195,7 +211,7 @@ class MaskableDictRolloutBuffer(DictRolloutBuffer):
                 self.observations[key] = self.swap_and_flatten(obs)
 
             _tensor_names = ["actions", "values", "log_probs",
-                             "advantages", "returns", "action_masks"]
+                             "advantages", "returns", "action_masks", "embeds"]
 
             for tensor in _tensor_names:
                 self.__dict__[tensor] = self.swap_and_flatten(
@@ -223,4 +239,6 @@ class MaskableDictRolloutBuffer(DictRolloutBuffer):
             returns=self.to_torch(self.returns[batch_inds].flatten()),
             action_masks=self.to_torch(
                 self.action_masks[batch_inds].reshape(-1, self.mask_dims)),
+            embeds=self.to_torch(
+                self.action_masks[batch_inds].reshape(-1, 768*200)),
         )

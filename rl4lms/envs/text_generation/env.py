@@ -82,6 +82,9 @@ class TextGenEnv(Env):
                 "input_attention_mask_pt": spaces.Box(
                     low=0, high=1, shape=(self._max_text_length + self.max_steps,)
                 ),
+                "index": spaces.Box(
+                    low=0, high=1000000, shape=(1,)
+                ),
             }
         )
         self.action_space = Discrete(n=self._vocab_size)
@@ -157,6 +160,7 @@ class TextGenEnv(Env):
         if sample is None:
             sample = self.sampler_for_replaying.sample(size=1)[0]
         self.__current_sample = sample
+        sample_index = int(sample.id.split("_")[1])
 
         # init the observation
         self.__current_obs = Observation.init_from_sample(
@@ -167,6 +171,7 @@ class TextGenEnv(Env):
             self._prompt_truncation_side,
             self._context_start_token,
             sample.meta_data,
+            sample_index
         )
 
         # start the time step counter

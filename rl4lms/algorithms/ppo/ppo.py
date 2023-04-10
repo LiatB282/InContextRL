@@ -12,7 +12,15 @@ from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedul
 from stable_baselines3.common.utils import explained_variance, get_schedule_fn
 from rl4lms.envs.text_generation.logging_utils import Tracker
 from rl4lms.envs.text_generation.policy.base_policy import EvaluateActionsOutput
+import logging
+import time
 
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+if logger.hasHandlers():
+    logger.handlers.clear()
+console = logging.StreamHandler()
+logger.addHandler(console)
 
 class PPO(OnPolicyAlgorithm):
     """
@@ -100,6 +108,7 @@ class PPO(OnPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        qa_model_name: str = None
     ):
 
         super().__init__(
@@ -180,6 +189,7 @@ class PPO(OnPolicyAlgorithm):
         """
         Update policy using the currently gathered rollout buffer.
         """
+        logger.info("PPO: train started")
         # Switch to train mode (this affects batch norm / dropout)
         # self.policy.set_training_mode(True)
         # Update optimizer learning rate
@@ -199,9 +209,15 @@ class PPO(OnPolicyAlgorithm):
 
         # train for n_epochs epochs
         for epoch in range(self.n_epochs):
+            logger.info(f"PPO: training epoch {epoch}")
+            epoch_start_time = time.time()
+
             approx_kl_divs = []
             # Do a complete pass on the rollout buffer
             for batch_ix, rollout_data in enumerate(list(self.rollout_buffer.get(self.batch_size))):
+                logger.info(f"PPO: training epoch {epoch} batch {batch_ix}")
+                batch_start_time = time.time()
+
                 # self.verify_rollout_data(rollout_data)
                 actions = rollout_data.actions
                 if isinstance(self.action_space, spaces.Discrete):
@@ -212,9 +228,12 @@ class PPO(OnPolicyAlgorithm):
                 if self.use_sde:
                     self.policy.reset_noise(self.batch_size)
 
+                actions_start_time = time.time()
                 evaluation_output: EvaluateActionsOutput = self.policy.evaluate_actions(
-                    rollout_data.observations, actions)
+                    rollout_data.observations, actions, rollout_data.embeds)
                 values, log_prob, entropy = evaluation_output.values, evaluation_output.log_prob, evaluation_output.entropy
+                logger.info(f"Evaluating actions took {time.time()-actions_start_time:.1f} seconds")
+                
                 values = values.flatten()
                 # Normalize advantage
                 advantages = rollout_data.advantages
@@ -290,9 +309,12 @@ class PPO(OnPolicyAlgorithm):
                 th.nn.utils.clip_grad_norm_(
                     self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
+                logger.info(f"Training on batch {batch_ix} took {time.time()-batch_start_time:.1f} seconds")
 
             if not continue_training:
                 break
+
+            logger.info(f"Training epoch took {(time.time()-epoch_start_time)/60:.1f} minutes")
 
         self._n_updates += self.n_epochs
         explained_var = explained_variance(

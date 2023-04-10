@@ -27,6 +27,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from index_utils.retriever import DenseRetriever
 
+import logging
+import time
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+if logger.hasHandlers():
+    logger.handlers.clear()
+console = logging.StreamHandler()
+logger.addHandler(console)
+
+
 @dataclass
 class TransitionInfo:
     observation: TensorDict
@@ -42,6 +53,7 @@ class TransitionInfo:
     kl_reward: np.ndarray
     action_mask: np.ndarray
     info: Dict[str, Any]
+    embeds: torch.Tensor
 
 
 def unpack_observations(obs_tensor, n_envs: int):
@@ -140,7 +152,7 @@ def wrap_onpolicy_alg(
             policy_kwargs = {
                 "obs": obs,
                 "actions": action,
-                "embeds": embeds,
+                "doc_embeds": embeds,
                 "past_model_kwargs": past_state,
             }
             if action_mask is not None:
@@ -161,12 +173,15 @@ def wrap_onpolicy_alg(
             # start parallel episodes
             current_obs = self.env.reset()
             episode_starts = np.ones((self.env.num_envs,), dtype=bool)
+            query_ids = list(current_obs['index'])
 
             # generate text using the model
             obs_tensor = obs_as_tensor(current_obs, self.device)
             generation_inputs = self.policy.get_inputs_for_generation(obs_tensor)
             gen_output = self.policy.generate(
                 input_ids=generation_inputs.inputs,
+                query_ids=query_ids,
+                max_steps=max_steps,
                 attention_mask=generation_inputs.attention_masks,
                 tokenizer=tokenizer,
                 retriever=self._retriever
@@ -184,8 +199,8 @@ def wrap_onpolicy_alg(
                 else [None] * len(gen_output.step_wise_logprobs)
             )
 
-            for actions_tensor, _, action_mask, embeds, input_ids, doc_ids in zip(
-                gen_output.step_wise_actions, gen_output.step_wise_logprobs, masks, gen_output.doc_embeds, gen_output.input_ids_list, gen_output.doc_ids
+            for actions_tensor, _, action_mask, embeds, doc_ids in zip(
+                gen_output.step_wise_actions, gen_output.step_wise_logprobs, masks, gen_output.doc_embeds, gen_output.doc_ids
             ):
                 # if all episodes are done, just break and do not continue
                 if np.all(ep_terminated):
@@ -249,8 +264,8 @@ def wrap_onpolicy_alg(
                     kl_rewards = -1 * self._kl_controller.kl_coeff * kl_div
 
                 # step into env to get rewards
-                doc_ids = doc_ids.cpu().numpy()
-                new_obs, rewards, dones, infos = self.env.step(doc_ids)
+                actions = actions_tensor.cpu().numpy()
+                new_obs, rewards, dones, infos = self.env.step(actions)
 
                 self.num_timesteps += self.env.num_envs
 
@@ -266,7 +281,7 @@ def wrap_onpolicy_alg(
                     if not ep_terminated[env_ix]:
                         transtion = TransitionInfo(
                             observation=unpacked_obs[env_ix],
-                            action=actions[env_ix],
+                            action=actions[env_ix], #TODO: check
                             task_reward=rewards[env_ix],
                             total_reward=total_rewards[env_ix],
                             kl_div=kl_div.cpu().numpy()[env_ix],
@@ -280,6 +295,7 @@ def wrap_onpolicy_alg(
                             if action_mask is not None
                             else None,
                             info=infos[env_ix],
+                            embeds=embeds[env_ix]
                         )
 
                         episode_wise_transitions[env_ix].append(transtion)
@@ -327,7 +343,8 @@ def wrap_onpolicy_alg(
                             transition.episode_start,
                             transition.value,
                             transition.log_prob,
-                            action_masks=transition.action_mask,
+                            embeds=transition.embeds,
+                            action_masks=transition.action_mask
                         )
 
                     # if the buffer is full, compute advantages
@@ -365,7 +382,10 @@ def wrap_onpolicy_alg(
             callback: BaseCallback,
             rollout_buffer: RolloutBuffer,
             n_rollout_steps: int,
+            max_generation_steps: int = 10
         ) -> bool:
+            collect_start_time = time.time()
+
             # max episode steps
             max_steps = env.unwrapped.get_attr("max_steps", [0])[0]
 
@@ -389,11 +409,16 @@ def wrap_onpolicy_alg(
                 "rollout_info/ref_log_prob": [],
                 "rollout_info/values": [],
             }
+
+            logger.info("AlgWrapper: collecting rollouts")
+
             while not rollout_buffer.full:
                 # generate batch of rollouts
                 rollout_info = self.generate_batch(
-                    rollout_buffer, tokenizer, max_steps, rollout_info
+                    rollout_buffer, tokenizer, 10, rollout_info
                 )
+
+            logger.info(f"Collecting rollouts took {(time.time()-collect_start_time)/60:.1f} minutes")
 
             # aggregate rollout info
             aggregated_rollout_info = {}
@@ -411,6 +436,7 @@ def wrap_onpolicy_alg(
             self._kl_controller.step(
                 torch.tensor(aggregated_rollout_info["rollout_info/kl_div_mean"])
             )
+
             return True
 
     # instantiate the wrapped alg

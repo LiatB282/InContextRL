@@ -48,7 +48,7 @@ class DenseRetriever(object):
         return results
     
     def get_random_docs(self, number, black_list):
-        ids_to_choose = [key[0] for key in self.index.id_to_db_id.keys() if key[0] not in black_list]
+        ids_to_choose = [key for key in self.index.id_to_db_id.keys() if key not in black_list]
         rand_indices = random.sample(ids_to_choose, number)
         data_and_vectors = [self.index.id_to_db_id[idx] for idx in rand_indices]
         return data_and_vectors

@@ -15,6 +15,7 @@ import re
 import sys
 from sentence_transformers import SentenceTransformer
 import torch
+from transformers import AutoTokenizer
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -27,7 +28,7 @@ if logger.hasHandlers():
 console = logging.StreamHandler()
 logger.addHandler(console)
 
-embeddings_file_format = r"encoded_passages_(.*).json"
+embeddings_file_format = r"encoded_passages_(.*).pkl"
 dataset_file_format  = r"dataset_passages_(.*).pkl"
     
 def load_base_model_embeddings(base_model_embeds_dir):
@@ -52,14 +53,19 @@ def load_base_model_embeddings(base_model_embeds_dir):
 def gen_ctx_vectors(
     ctx_rows,
     batch_size,
-    model
+    model,
+    tokenizer,
+    is_last=False
 ) -> List[Tuple[object, np.array]]:
     n = len(ctx_rows)
     total = 0
-    results = [None] * (n + 1)
+    if is_last:
+        results = [None] * (n + 1)
+    else:
+        results = [None] * n
 
     logger.info("Sorting contexts")
-    sorted_indices = list(reversed(np.argsort([len(ctx) for _, ctx, _ in ctx_rows])))
+    sorted_indices = list(reversed(np.argsort([len(ctx) for _, ctx in ctx_rows])))
 
     logger.info("Generating embeddings...")
     start_time = time.time()
@@ -68,8 +74,10 @@ def gen_ctx_vectors(
         batch_rows = [ctx_rows[ind] for ind in batch_indices]
         batch_ids, batch_inputs = zip(*batch_rows)
         batch_ids = list(batch_ids)
+        encodings = torch.from_numpy(model.encode(batch_inputs))
+        tokenized = tokenizer.batch_encode_plus(list(batch_inputs), return_tensors="pt", padding='longest', max_length=512)['input_ids'].squeeze(0)
 
-        out = torch.nn.functional.normalize(model.encode(batch_inputs), dim=1) 
+        out = torch.nn.functional.normalize(encodings, dim=1)
         out = out.cpu()
 
         assert len(batch_ids) == out.size(0)
@@ -78,53 +86,64 @@ def gen_ctx_vectors(
 
         for i, ind in enumerate(batch_indices):
             assert results[ind] is None
-            results[ind] = ((batch_ids[i], batch_inputs[i]), out[i].view(-1).numpy())
+            results[ind] = ((batch_ids[i], tokenized[i]), out[i].view(-1).numpy())
 
         if total % 10 == 0:
             logger.info(f"Encoded {total} passages, took {time.time()-start_time:.1f} seconds")
 
     # Adding the ending action
-    results[n] = ((0, np.array(batch_inputs[i].shape)), np.zeros(768))
+    if is_last:
+        logger.info("Adding the ending action")
+        results[n] = ((0, np.zeros(1)), np.zeros(768))
 
     logger.info(f"Done. Took {(time.time()-start_time)/60:.1f} minutes")
 
     return results
 
 def main(args):
-    os.makedirs(args.output_dir, exist_ok=True)
+    print_args(args)
 
-    print_args(args, args.output_dir)
+    splits = ["train", "validation", "test"]
 
-    model = SentenceTransformer(args.model_name, cache_dir=args.cache_dir).to(args.device)
-    model.eval()
+    for split in splits:
+        logger.info(f"Working on split {split}")
+        output_dir = f"{args.output_dir}/{split}"
+        input_files_path = f"{args.input_dir}/{split}/dataset_passages_*.pkl"
 
-    input_files = glob.glob(args.input_files)
-    logger.info(f"Processing {len(input_files)} files.")
-    total_num_psgs = 0
+        os.makedirs(output_dir, exist_ok=True)
 
-    for i, input_file in enumerate(input_files):
-        file_name = ntpath.basename(input_file)
-        if int(re.match(dataset_file_format, file_name).group(1)) % args.workers != args.worker_number:
-            continue
+        model = SentenceTransformer(args.model_name, cache_folder=args.cache_dir).to(args.device)
+        model.eval()
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir="/home/gamir/liat/cache")
 
-        out_file = os.path.join(args.output_dir, file_name.replace("dataset", "encoded").replace("json", "pkl"))
-        if os.path.exists(out_file):
-            continue
+        input_files = glob.glob(input_files_path)
+        logger.info(f"Processing {len(input_files)} files.")
+        total_num_psgs = 0
 
-        logger.info(f"Processing file: {input_file}")
+        for i, input_file in enumerate(input_files):
+            file_name = ntpath.basename(input_file)
+            if int(re.match(dataset_file_format, file_name).group(1)) % args.workers != args.worker_number:
+                continue
 
-        with open(input_file, "rb") as f:
-            rows = json.load(f)
+            out_file = os.path.join(output_dir, file_name.replace("dataset", "encoded"))
+            if os.path.exists(out_file):
+                continue
 
-        data = gen_ctx_vectors(rows, args.batch_size, model)
+            logger.info(f"Processing file: {input_file}")
 
-        assert not os.path.exists(out_file)
-        logger.info("Writing results to %s" % out_file)
-        with open(out_file, mode="wb") as f:
-            pickle.dump(data, f)
-        total_num_psgs += len(data)
-        logger.info(f"Total passages processed {total_num_psgs} from {i+1} files. Written to {out_file}")
-    logger.info("Done.")
+            with open(input_file, "rb") as f:
+                rows = pickle.load(f)
+
+            is_last = i == len(input_files) - 1
+            data = gen_ctx_vectors(rows, args.batch_size, model, tokenizer, is_last=is_last)
+
+            assert not os.path.exists(out_file)
+            logger.info("Writing results to %s" % out_file)
+            with open(out_file, mode="wb") as f:
+                pickle.dump(data, f)
+            total_num_psgs += len(data)
+            logger.info(f"Total passages processed {total_num_psgs} from {i+1} files. Written to {out_file}")
+        logger.info("Done.")
 
 
 if __name__ == "__main__":
@@ -164,12 +183,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name",
         type=str,
-        default='t5-base'
+        default='sentence-transformers/gtr-t5-base'
     )
 
     args = parser.parse_args()
-
-    args.input_files = f"{args.input_dir}/tokenized_passages_*.pkl"
 
     if "workers" in os.environ and "worker_number" in os.environ:
         args.workers = int(os.environ["workers"])

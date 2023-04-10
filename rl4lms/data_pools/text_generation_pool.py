@@ -50,11 +50,15 @@ class TextGenPool:
 
 class TriviaQAPool(TextGenPool):
     @classmethod
-    def prepare(cls, split: str):
-        samples = load_dataset('trivia_qa', 'rc', split='train')
-        for ix, item in enumerate(samples):
-            sample = Sample(id=f"{split}_{ix}",
-                            prompt_or_input_text=item['question'],
+    def prepare(cls, split: str, train_encoded_dataset_path: str=None, val_encoded_dataset_path: str=None, test_encoded_dataset_path: str=None, is_debug: bool=False):
+        hf_split = split if split in ['train', 'test'] else 'validation'
+        dataset = load_dataset('trivia_qa', 'rc', split=hf_split)
+        if is_debug:
+            dataset = [dataset[i] for i in range(1000)]
+        samples = []
+        for ix, item in enumerate(dataset):
+            sample = Sample(id=f"{split}_{ix+1}",
+                            prompt_or_input_text=f"Input: {item['question']} Output:",
                             references=list(set([item['answer']['value']] + item['answer']['aliases']))
                             )
             samples.append(sample)

@@ -21,6 +21,7 @@ from rl4lms.data_pools.custom_text_generation_pools import (
     WMT16NewsOnlyDatasetEnDe,
     DailyDialog,
 )
+from rl4lms.data_pools.text_generation_pool import TriviaQAPool
 from rl4lms.data_pools.text_generation_pool import TextGenPool
 from rl4lms.envs.text_generation.alg_wrappers import wrap_onpolicy_alg
 from rl4lms.envs.text_generation.metric import (
@@ -44,6 +45,7 @@ from rl4lms.envs.text_generation.metric import (
     TERMetric,
     chrFmetric,
     IntentAccuracyDailyDialog,
+    ExactMatchMetric
 )
 from rl4lms.envs.text_generation.policy.base_policy import LMActorCriticPolicy
 from rl4lms.envs.text_generation.policy.causal_policy import (
@@ -73,6 +75,7 @@ from rl4lms.envs.text_generation.reward import (
     SpiderRewardFunction,
     chrF,
     IntentAccuracy,
+    OurRewardFunction
 )
 from rl4lms.envs.text_generation.preference_reward import CommonGenPrefRM
 from rl4lms.envs.text_generation.test_datapool import TestTextGenPool
@@ -98,6 +101,7 @@ class DataPoolRegistry:
         "iwslt2017en_de": IWSLT2017EnDe,
         "crd3": CRD3DialogueGeneration,
         "daily_dialog": DailyDialog,
+        "trivia_qa": TriviaQAPool
     }
 
     @classmethod
@@ -132,6 +136,7 @@ class RewardFunctionRegistry:
         "chrf": chrF,
         "intent_accuracy": IntentAccuracy,
         "common_gen_preference_model": CommonGenPrefRM,
+        "in_context_reward": OurRewardFunction
     }
 
     @classmethod
@@ -168,6 +173,7 @@ class MetricRegistry:
         "ter": TERMetric,
         "chrf": chrFmetric,
         "intent_accuracy": IntentAccuracyDailyDialog,
+        "exact_match": ExactMatchMetric
     }
 
     @classmethod

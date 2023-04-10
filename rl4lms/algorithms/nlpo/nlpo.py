@@ -22,7 +22,15 @@ from rl4lms.algorithms.common.maskable.utils import get_action_masks, is_masking
 from rl4lms.algorithms.nlpo.policies import CnnPolicy, MlpPolicy, MultiInputPolicy
 from rl4lms.envs.text_generation.logging_utils import Tracker
 from rl4lms.envs.text_generation.policy.base_policy import EvaluateActionsOutput
+import logging
+import time
 
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+if logger.hasHandlers():
+    logger.handlers.clear()
+console = logging.StreamHandler()
+logger.addHandler(console)
 
 class NLPO(OnPolicyAlgorithm):
     """
@@ -101,6 +109,7 @@ class NLPO(OnPolicyAlgorithm):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
     ):
+        logger.info("Init NLPO algorithm")
         super().__init__(
             policy,
             env,
@@ -314,6 +323,7 @@ class NLPO(OnPolicyAlgorithm):
         """
         Update policy using the currently gathered rollout buffer.
         """
+        logger.info("NLPO: training")
         # Switch to train mode (this affects batch norm / dropout)
         # self.policy.train()  # set_training_mode(True)
         # Update optimizer learning rate

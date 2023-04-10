@@ -1,0 +1,67 @@
+	tokenizer:
+	  model_name: t5-base
+	  padding_side: left
+	  truncation_side: left
+	  pad_token_as_eos_token: False
+
+	reward_fn:
+	  id: in_context_reward
+
+	datapool:
+	  id: trivia_qa
+	  args:
+		is_debug: True
+		train_encoded_dataset_path: /home/gamir/liat/InContextRL/train_data_embeddings_debug/encoded_passages_*.pkl
+		val_encoded_dataset_path: /home/gamir/liat/InContextRL/val_data_embeddings_debug/encoded_passages_*.pkl
+		test_encoded_dataset_path: /home/gamir/liat/InContextRL/test_data_embeddings_debug/encoded_passages_*.pkl
+
+	env:
+	  n_envs: 10
+	  args:
+		max_prompt_length: 1000
+		max_episode_length: 100
+		terminate_on_eos: True
+		prompt_truncation_side: "right"
+		context_start_token: 0
+
+	alg:
+	  id: ppo
+	  args: 
+		n_steps: 128
+		batch_size: 64
+		verbose: 1
+		learning_rate: 0.000002
+		n_epochs: 5
+		ent_coef: 0.0
+		qa_model_name: gpt2
+	  kl_div:
+		coeff: 0.001
+		target_kl: 0.2
+	  policy:
+		id: seq2seq_lm_actor_critic_policy
+		args:
+		  model_name: sentence-transformers/gtr-t5-base
+
+		  apply_model_parallel: False
+		  prompt_truncation_side: "right"
+		  generation_kwargs:
+			do_sample: False
+			top_k: 0
+			temperature: 0
+			min_length: 1
+			max_new_tokens: 1       
+		
+	train_evaluation:
+	  eval_batch_size: 100
+	  n_iters: 50
+	  eval_every: 10
+	  save_every: 1
+	  metrics:
+		- id: exact_match
+		  args: {}
+	  generation_kwargs: 
+		do_sample: False
+		top_k: 0
+		temperature: 0
+		min_length: 1
+		max_new_tokens: 1

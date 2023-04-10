@@ -32,8 +32,18 @@ from rl4lms.envs.text_generation.warm_start import TrainerWarmStartMixin
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from rl4lms.qa_models.general_qa_model import GeneralQAModel
 
 from index_utils.retriever import DenseRetriever
+
+import time
+import logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+if logger.hasHandlers():
+    logger.handlers.clear()
+console = logging.StreamHandler()
+logger.addHandler(console)
 
 def build_tokenizer(tokenizer_config: Dict[str, Any]):
     tokenizer = AutoTokenizer.from_pretrained(
@@ -47,14 +57,17 @@ def build_tokenizer(tokenizer_config: Dict[str, Any]):
     return tokenizer
 
 
-def build_reward_fn(reward_config: Dict[str, Any]):
-    reward_fn = RewardFunctionRegistry.get(reward_config["id"],
-                                           reward_config.get("args", {}))
+def build_reward_fn(reward_config: Dict[str, Any], qa_model: GeneralQAModel):
+    args = reward_config.get("args", {})
+    args["qa_model"] = qa_model
+    reward_fn = RewardFunctionRegistry.get(reward_config["id"], args)
     return reward_fn
 
 
-def build_metrics(metric_configs: List[Dict[str, Any]]):
-    metrics = [MetricRegistry.get(metric_config["id"], metric_config.get("args", {}))
+def build_metrics(metric_configs: List[Dict[str, Any]], qa_model: GeneralQAModel):
+    args = metric_configs[0].get("args", {})
+    args["qa_model"] = qa_model
+    metrics = [MetricRegistry.get(metric_config["id"], args)
                for metric_config in metric_configs]
     return metrics
 
@@ -161,21 +174,22 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
         self.load_trainer_state(self._tracker)
 
         # build components
+        qa_model = GeneralQAModel(self._on_policy_alg_config['args']['qa_model_name'])
         self._tokenizer = build_tokenizer(self._tokenizer_config)
-        self._reward_fn = build_reward_fn(self._reward_config)
+        self._reward_fn = build_reward_fn(self._reward_config, qa_model)
         self._metrics = build_metrics(
-            self._train_eval_config.get("metrics", []))
-        self._retriever = DenseRetriever(ctx_files_pattern=self._datapool_config.encoded_dataset_path)
+            self._train_eval_config.get("metrics", []), qa_model)
+        self._retrievers = self.init_retrievers()
         self._samples_by_split = build_datapool(
             self._datapool_config)
         self._env = build_env(self._env_config, self._reward_fn,
                               self._tokenizer, self._samples_by_split["train"],
-                              self._retriever)
+                              self._retrievers['train'])
         self._alg = build_alg(self._on_policy_alg_config,
                               self._env, self._tracker,
                               self._policy_state_dict,
                               self._alg_state_dict,
-                              self._retriever)
+                              self._retrievers['train'])
 
         # extract train params
         self._max_episode_length = self._env_config["args"]["max_episode_length"]
@@ -187,6 +201,12 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
         # gen kwargs for evaluation (if it is different from rollout gen kwargs)
         self._eval_gen_kwargs = self._train_eval_config.get(
             "generation_kwargs", None)
+        
+    def init_retrievers(self):
+        retrievers = { }
+        for split in ["train", "val", "test"]:
+            retrievers[split] = DenseRetriever(ctx_files_pattern=self._datapool_config['args'][f'{split}_encoded_dataset_path'])
+        return retrievers
 
     def _evaluate_on_datapools(self, epoch: int,
                                splits: List[str] = ["val", "test"]):
@@ -201,7 +221,7 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
                                 split_name=split,
                                 tracker=self._tracker,
                                 gen_kwargs=self._eval_gen_kwargs,
-                                retriever=self._retriever)
+                                retriever=self._retrievers[split])
 
     def train_and_eval(self):
         # evaluate on val and test set before fine-tuning once
@@ -210,6 +230,8 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
 
         # train for given number of iters
         for epoch in range(iter_start, self._n_iters):
+            logger.info(f"TrainingUtils: epoch {epoch} / {self._n_iters}")
+
             # current state
             self._trainer_state["current_iter"] = epoch
 

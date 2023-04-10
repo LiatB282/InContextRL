@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from index_utils.retriever import DenseRetriever
 
+FULL_SIZE = 1000
 
 @dataclass
 class Observation:
@@ -38,6 +39,8 @@ class Observation:
     # other meta info
     meta_info: Dict[str, Any]
 
+    index: int
+
     def to_dict(self) -> Dict[str, torch.tensor]:
         """
         For stable baselines (only return tensor items)
@@ -48,8 +51,8 @@ class Observation:
             "context_encoded_pt": self.context_encoded_pt.numpy().flatten(),
             "context_attention_mask_pt": self.context_attention_mask_pt.numpy().flatten(),
             "input_encoded_pt": self.input_encoded_pt.numpy().flatten(),
-            "input_attention_mask_pt": self.input_attention_mask_pt.numpy().flatten()
-
+            "input_attention_mask_pt": self.input_attention_mask_pt.numpy().flatten(),
+            "index": self.index
         }
         return dict_obs
 
@@ -87,10 +90,14 @@ class Observation:
         # current_context_attention_mask = deepcopy(
         #     self.context_attention_mask_pt)
         
-        input_ids = retriver.get_input_ids_from_docs_id(action) + [1713]
-        input_ids = torch.tensor(input_ids)
-        current_prompt = torch.cat(input_ids, current_prompt, dim=1)
-        current_prompt_attention_mask = current_prompt != tokenizer.pad_token_id
+        input_ids = retriver.get_input_ids_from_docs_id(action)
+
+        input_ids = torch.masked_select(input_ids, input_ids != 0)
+        input_ids[-1] = 1713
+        current_prompt = torch.masked_select(current_prompt, current_prompt != 0)
+        current_prompt = torch.cat([current_prompt, input_ids], dim=0)
+        
+        #current_prompt_attention_mask = current_prompt != tokenizer.pad_token_id
 
         # # just shift the context (also the attention mask) to left by 1
         # current_context[:, 0:-1] = current_context[:, 1:].clone()
@@ -106,10 +113,15 @@ class Observation:
             current_prompt.flatten(), skip_special_tokens=True)
 
         # concatenate and still keep the left padding
-        input_encoded_pt, input_attention_mask_pt = Observation._concat(
-            current_prompt, current_prompt_attention_mask,
-            self.context_encoded_pt, self.context_attention_mask_pt,
-            tokenizer.pad_token_id)
+        # input_encoded_pt, input_attention_mask_pt = Observation._concat(
+        #     current_prompt, current_prompt_attention_mask,
+        #     self.context_encoded_pt, self.context_attention_mask_pt,
+        #     tokenizer.pad_token_id)
+
+        full_size_prompt = torch.zeros((1, FULL_SIZE), device=current_prompt.device).int()
+        full_size_prompt[:, (FULL_SIZE - current_prompt.shape[0]):] = current_prompt #TODO: check the shape
+        current_prompt = full_size_prompt
+        current_prompt_attention_mask = current_prompt != tokenizer.pad_token_id
 
         # and create a new observation
         obs = Observation(current_prompt,
@@ -119,10 +131,11 @@ class Observation:
                           self.context_attention_mask_pt,
                           self.context_text,
                           self.target_or_reference_texts,
-                          input_encoded_pt,
-                          input_attention_mask_pt,
+                          current_prompt,
+                          current_prompt_attention_mask,
                           current_action_history,
-                          self.meta_info)
+                          self.meta_info,
+                          self.index)
 
         return obs
 
@@ -133,7 +146,8 @@ class Observation:
                          max_context_length: int,
                          prompt_truncation_side: str,
                          context_start_token: int = None,
-                         meta_info: Dict[str, Any] = None):
+                         meta_info: Dict[str, Any] = None,
+                         sample_index: int = None):
         # encode the prompt text
         # override truncation side for prompt
         prev_truncation_side = tokenizer.truncation_side
@@ -166,22 +180,23 @@ class Observation:
                                     return_attention_mask=True)
 
         # concatenate
-        input_encoded_pt, input_attention_mask_pt = Observation._concat(
-            prompt_outputs.input_ids, prompt_outputs.attention_mask,
-            context_outputs.input_ids, context_outputs.attention_mask,
-            tokenizer.pad_token_id)
+        # input_encoded_pt, input_attention_mask_pt = Observation._concat(
+        #     prompt_outputs.input_ids, prompt_outputs.attention_mask,
+        #     context_outputs.input_ids, context_outputs.attention_mask,
+        #     tokenizer.pad_token_id)
 
         obs = Observation(prompt_or_input_encoded_pt=prompt_outputs.input_ids,
                           prompt_or_input_attention_mask_pt=prompt_outputs.attention_mask,
                           prompt_or_input_text=sample.prompt_or_input_text,
                           context_encoded_pt=context_outputs.input_ids,
                           context_attention_mask_pt=context_outputs.attention_mask,
-                          input_encoded_pt=input_encoded_pt,
-                          input_attention_mask_pt=input_attention_mask_pt,
+                          input_encoded_pt=prompt_outputs.input_ids,
+                          input_attention_mask_pt=prompt_outputs.attention_mask,
                           context_text="",
                           target_or_reference_texts=sample.references,
                           action_history=[],
-                          meta_info=meta_info)
+                          meta_info=meta_info,
+                          index=sample_index)
 
         return obs
 

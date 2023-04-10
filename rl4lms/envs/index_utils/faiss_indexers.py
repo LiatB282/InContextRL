@@ -34,7 +34,7 @@ class DenseIndexer(object):
         for i, item in enumerate(iterate_encoded_files(vector_files)):
             db_id, doc_vector = item
             buffer.append((db_id, doc_vector))
-            self.id_to_db_id[db_id[0]] = (db_id, doc_vector)
+            self.id_to_db_id_and_vector[db_id[0]] = (db_id, doc_vector)
             if 0 < self.buffer_size == len(buffer):
                 # indexing in batches is beneficial for many faiss index types
                 self._index_batch(buffer)

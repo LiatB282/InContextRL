@@ -16,7 +16,8 @@ from rl4lms.data_pools.custom_text_generation_pools import DailyDialog
 from tqdm import tqdm
 import copy
 import rouge
-
+from rl4lms.qa_models.evaluation import check_answer_truthfulness
+from rl4lms.qa_models.general_qa_model import GeneralQAModel
 
 class BaseMetric:
     @abstractmethod
@@ -659,6 +660,29 @@ class chrFmetric(BaseMetric):
         metric_dict = {"lexical/chrf": (None, score)}
         return metric_dict
 
+class ExactMatchMetric(BaseMetric):
+    def __init__(self, qa_model : GeneralQAModel) -> None:
+        super().__init__()
+        self._qa_model = qa_model
+
+    def compute(
+        self,
+        prompt_texts: List[str],
+        generated_texts: List[str],
+        reference_texts: List[List[str]],
+        meta_infos: List[Dict[str, Any]] = None,
+        model: PreTrainedModel = None,
+        split_name: str = None,
+    ) -> Tuple[List[float], float]:
+
+        all_scores = []
+        for prompt_text, ref_texts in zip(prompt_texts, reference_texts):
+            model_answer = self.qa_model.generate_answer(prompt_text)
+            score = 1 if check_answer_truthfulness(model_answer, ref_texts) else 0
+            all_scores.append(score)
+
+        metric_dict = {"semantic/exact_match": (all_scores, np.mean(all_scores))}
+        return metric_dict
 
 class IntentAccuracyDailyDialog(BaseMetric):
     def __init__(self) -> None:

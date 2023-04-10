@@ -15,12 +15,12 @@ from rl4lms.envs.text_generation.metric import (
     TERMetric,
     chrFmetric,
     IntentAccuracyDailyDialog,
+    ExactMatchMetric
 )
 import numpy as np
 from typing import List, Dict, Any
 import math
 from rl4lms.qa_models.general_qa_model import GeneralQAModel
-from rl4lms.qa_models.evaluation import check_answer_truthfulness
 
 
 class RewardFunction(ABC):
@@ -611,6 +611,10 @@ class IntentAccuracy(BatchedRewardFunction):
 
 
 class OurRewardFunction(RewardFunction):
+    def __init__(self, qa_model : GeneralQAModel) -> None:
+        super().__init__()
+        self._metric = ExactMatchMetric(qa_model)
+
     def __call__(
         self,
         current_observation: Observation,
@@ -621,18 +625,10 @@ class OurRewardFunction(RewardFunction):
     ) -> float:
         curr_prompt_text = next_observation.prompt_or_input_text
         if done:
-            qa_model = meta_info['model']
-            model_answer = qa_model.generate_answer(curr_prompt_text)
-            gold_answers = meta_info['answers']
-            if check_answer_truthfulness(model_answer, gold_answers):
-                return 1
-
+            return self.self._metric.compute([curr_prompt_text], None, [next_observation.target_or_reference_texts])["semantic/exact_match"][1]
         else:
             number_of_incontext_examples = current_observation.count('question:') - 1
             return -math.pow(0.5, number_of_incontext_examples + 1)
-
-        return 0
-
 
 if __name__ == "__main__":
     predictions = "hello there general kenobi"
