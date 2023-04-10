@@ -51,14 +51,14 @@ def main(args):
     for split in ["train", "validation", "test"]:
         logger.info(f"Working on split {split}")
         output_dir = f"{args.output_dir}/{split}"
-        samples = load_dataset('trivia_qa', 'rc', split)
+        samples = load_dataset('trivia_qa', 'rc', split=split)
 
         rows = [ {"id": i+1, "input": f"Input: {samples[i]['question']} Output: {samples[i]['answer']['value']}"} for i in range(len(samples))]
 
         logger.info(f"Done. Took {(time.time() - start_time) / 60:.1f} minutes")
 
         # Creating the output directory. If exists, crash.
-        os.makedirs(args.output_dir, exist_ok=False)
+        os.makedirs(output_dir, exist_ok=False)
 
         params = [prepare_params_for_shard(output_dir, rows,
                                         args.num_processes_and_shards,

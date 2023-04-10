@@ -48,17 +48,17 @@ class DenseRetriever(object):
         return results
     
     def get_random_docs(self, number, black_list):
-        ids_to_choose = [key for key in self.index.id_to_db_id.keys() if key not in black_list]
+        ids_to_choose = [key for key in self.index.id_to_db_id_and_vector.keys() if key not in black_list]
         rand_indices = random.sample(ids_to_choose, number)
-        data_and_vectors = [self.index.id_to_db_id[idx] for idx in rand_indices]
+        data_and_vectors = [self.index.id_to_db_id_and_vector[idx] for idx in rand_indices]
         return data_and_vectors
     
     def get_embeds_from_docs_ids(self, docs_ids):
         embeds = []
         for id in docs_ids:
-            embeds.append(self.index.id_to_db_id[id][1])
+            embeds.append(self.index.id_to_db_id_and_vector[id][1])
         return embeds
     
     def get_input_ids_from_docs_id(self, docs_id):
-        return self.index.id_to_db_id[docs_id][0][1]
+        return self.index.id_to_db_id_and_vector[docs_id][0][1]
 

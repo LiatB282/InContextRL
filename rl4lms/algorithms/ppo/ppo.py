@@ -209,14 +209,13 @@ class PPO(OnPolicyAlgorithm):
 
         # train for n_epochs epochs
         for epoch in range(self.n_epochs):
-            logger.info(f"PPO: training epoch {epoch}")
+            logger.info(f"PPO: training epoch {epoch} / {self.n_epochs}")
             epoch_start_time = time.time()
 
             approx_kl_divs = []
             # Do a complete pass on the rollout buffer
             for batch_ix, rollout_data in enumerate(list(self.rollout_buffer.get(self.batch_size))):
-                logger.info(f"PPO: training epoch {epoch} batch {batch_ix}")
-                batch_start_time = time.time()
+                #batch_start_time = time.time()
 
                 # self.verify_rollout_data(rollout_data)
                 actions = rollout_data.actions
@@ -309,12 +308,12 @@ class PPO(OnPolicyAlgorithm):
                 th.nn.utils.clip_grad_norm_(
                     self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
-                logger.info(f"Training on batch {batch_ix} took {time.time()-batch_start_time:.1f} seconds")
+                #logger.info(f"Training on batch {batch_ix} took {time.time()-batch_start_time:.1f} seconds")
 
             if not continue_training:
                 break
 
-            logger.info(f"Training epoch took {(time.time()-epoch_start_time)/60:.1f} minutes")
+            #logger.info(f"Training epoch took {(time.time()-epoch_start_time)/60:.1f} minutes")
 
         self._n_updates += self.n_epochs
         explained_var = explained_variance(

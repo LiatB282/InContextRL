@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from index_utils.retriever import DenseRetriever
 
-FULL_SIZE = 1000
+FULL_SIZE = 500
 
 @dataclass
 class Observation:
@@ -89,7 +89,7 @@ class Observation:
         current_prompt = deepcopy(self.prompt_or_input_encoded_pt)
         # current_context_attention_mask = deepcopy(
         #     self.context_attention_mask_pt)
-        
+
         input_ids = retriver.get_input_ids_from_docs_id(action)
 
         input_ids = torch.masked_select(input_ids, input_ids != 0)

@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from transformers.generation_utils import GenerationMixin
+from transformers.generation import GenerationMixin
 import inspect
 import warnings
 from dataclasses import dataclass

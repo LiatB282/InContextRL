@@ -11,9 +11,7 @@ datapool:
   id: trivia_qa
   args:
     is_debug: False
-    train_encoded_dataset_path: /home/gamir/liat/InContextRL/train_data_embeddings/encoded_passages_*.pkl
-    val_encoded_dataset_path: /home/gamir/liat/InContextRL/val_data_embeddings/encoded_passages_*.pkl
-    test_encoded_dataset_path: /home/gamir/liat/InContextRL/test_data_embeddings/encoded_passages_*.pkl
+    encoded_dataset_path: /home/gamir/liat/InContextRL/data_embeddings/SPLIT/encoded_passages_*.pkl
 
 env:
   n_envs: 10

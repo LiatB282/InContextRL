@@ -271,12 +271,6 @@ dmypy.json
 cluster_utils/
 **/wandb/
 home/gamir/liat/cache/*
-train_preprocessed_data/*
-test_preprocessed_data/*
-val_preprocessed_data/*
-train_data_embeddings/*
-val_data_embeddings/*
-test_data_embeddings/*
-train_data_embeddings_debug/*
-val_data_embeddings_debug/*
-test_data_embeddings_debug/*
+preprocessed_data/*
+data_embeddings/*
+data_embeddings_debug/*

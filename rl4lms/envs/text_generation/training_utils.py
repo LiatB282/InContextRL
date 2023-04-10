@@ -205,7 +205,8 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
     def init_retrievers(self):
         retrievers = { }
         for split in ["train", "val", "test"]:
-            retrievers[split] = DenseRetriever(ctx_files_pattern=self._datapool_config['args'][f'{split}_encoded_dataset_path'])
+            split_hf = split if split != "val" else "validation"
+            retrievers[split] = DenseRetriever(ctx_files_pattern=self._datapool_config['args']['encoded_dataset_path'].replace("SPLIT", split_hf))
         return retrievers
 
     def _evaluate_on_datapools(self, epoch: int,

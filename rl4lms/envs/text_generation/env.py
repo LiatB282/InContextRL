@@ -77,10 +77,10 @@ class TextGenEnv(Env):
                 "input_encoded_pt": spaces.Box(
                     low=0,
                     high=self._vocab_size,
-                    shape=(self._max_text_length + self.max_steps,),
+                    shape=(self._max_text_length,),
                 ),
                 "input_attention_mask_pt": spaces.Box(
-                    low=0, high=1, shape=(self._max_text_length + self.max_steps,)
+                    low=0, high=1, shape=(self._max_text_length,)
                 ),
                 "index": spaces.Box(
                     low=0, high=1000000, shape=(1,)

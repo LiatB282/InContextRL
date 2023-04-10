@@ -197,7 +197,7 @@ class MaskableDictRolloutBuffer(DictRolloutBuffer):
                 (self.n_envs, self.mask_dims))
             
         self.embeds[self.pos] = embeds.reshape(
-                (self.n_envs, -1))
+                (self.n_envs, -1)).cpu()
 
         super().add(*args, **kwargs)
 
@@ -240,5 +240,5 @@ class MaskableDictRolloutBuffer(DictRolloutBuffer):
             action_masks=self.to_torch(
                 self.action_masks[batch_inds].reshape(-1, self.mask_dims)),
             embeds=self.to_torch(
-                self.action_masks[batch_inds].reshape(-1, 768*200)),
+                self.embeds[batch_inds].reshape(-1, 768*200)),
         )
