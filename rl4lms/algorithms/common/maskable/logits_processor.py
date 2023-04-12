@@ -2,7 +2,7 @@ from typing import Dict, Optional, Union
 
 import torch
 from torch.distributions.utils import logits_to_probs, probs_to_logits
-from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, LogitsProcessor
+from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, LogitsProcessor, T5EncoderModel
 from transformers.modeling_utils import unwrap_model
 
 from rl4lms.algorithms.common.maskable.distributions import (
@@ -44,7 +44,7 @@ class MaskLogitsProcessorCasualLM(LogitsProcessor):
 
     def _prepare_inputs_for_model(
         self,
-        model: Union[AutoModelForCausalLM, AutoModelForSeq2SeqLM],
+        model: Union[AutoModelForCausalLM, AutoModelForSeq2SeqLM, T5EncoderModel],
         input_ids: torch.Tensor,
         model_kwargs: Optional[Dict[str, torch.tensor]] = None,
     ):
@@ -190,7 +190,7 @@ class MaskLogitsProcessorSeq2SeqLM(LogitsProcessor):
 
     def _prepare_inputs_for_model(
         self,
-        model: Union[AutoModelForCausalLM, AutoModelForSeq2SeqLM],
+        model: Union[AutoModelForCausalLM, AutoModelForSeq2SeqLM, T5EncoderModel],
         input_ids: torch.Tensor,
         model_kwargs: Optional[Dict[str, torch.tensor]] = None,
     ):

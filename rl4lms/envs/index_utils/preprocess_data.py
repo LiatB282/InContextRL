@@ -53,7 +53,7 @@ def main(args):
         output_dir = f"{args.output_dir}/{split}"
         samples = load_dataset('trivia_qa', 'rc', split=split)
 
-        rows = [ {"id": i+1, "input": f"Input: {samples[i]['question']} Output: {samples[i]['answer']['value']}"} for i in range(len(samples))]
+        rows = [ {"id": i+1, "input": f"Question: {samples[i]['question']} Answer: {samples[i]['answer']['value']}"} for i in range(len(samples))]
 
         logger.info(f"Done. Took {(time.time() - start_time) / 60:.1f} minutes")
 

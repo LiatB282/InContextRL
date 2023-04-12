@@ -58,7 +58,7 @@ class TriviaQAPool(TextGenPool):
         samples = []
         for ix, item in enumerate(dataset):
             sample = Sample(id=f"{split}_{ix+1}",
-                            prompt_or_input_text=f"Input: {item['question']} Output:",
+                            prompt_or_input_text=f"Question: {item['question']} Answer:",
                             references=list(set([item['answer']['value']] + item['answer']['aliases']))
                             )
             samples.append(sample)

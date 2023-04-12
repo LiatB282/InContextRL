@@ -625,9 +625,9 @@ class OurRewardFunction(RewardFunction):
     ) -> float:
         curr_prompt_text = next_observation.prompt_or_input_text
         if done:
-            return self.self._metric.compute([curr_prompt_text], None, [next_observation.target_or_reference_texts])["semantic/exact_match"][1]
+            return self._metric.compute([curr_prompt_text], None, [next_observation.target_or_reference_texts])["semantic/exact_match"][1]
         else:
-            number_of_incontext_examples = curr_prompt_text.count('Input:') - 1
+            number_of_incontext_examples = curr_prompt_text.count('Question:') - 1
             return -math.pow(0.5, number_of_incontext_examples + 1)
 
 if __name__ == "__main__":

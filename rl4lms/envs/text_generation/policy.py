@@ -6,7 +6,7 @@ from gym.spaces.dict import Dict as DictSpace
 from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.type_aliases import Schedule
 from torch import nn
-from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM, T5EncoderModel
 from stable_baselines3.common.distributions import CategoricalDistribution
 from torch.distributions import Categorical
 from copy import deepcopy
@@ -360,12 +360,12 @@ class LMActorCriticPolicy(BasePolicy, ActorCriticWarmStartMixin):
 class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy):
     def _build_model_heads(self,
                            model_name: str):
-        self._policy_model = AutoModelForSeq2SeqLM.from_pretrained(
+        self._policy_model = T5EncoderModel.from_pretrained(
             model_name)
         self._policy_model.__class__ = override_generation_routines(
             type(self._policy_model))
 
-        self._value_model = AutoModelForSeq2SeqLM.from_pretrained(
+        self._value_model = T5EncoderModel.from_pretrained(
             model_name)
         self._ref_model = deepcopy(self._policy_model).eval()
 

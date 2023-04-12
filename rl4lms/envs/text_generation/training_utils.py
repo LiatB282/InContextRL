@@ -22,7 +22,9 @@ from transformers import (AutoTokenizer,
                           Trainer,
                           TrainingArguments,
                           DataCollatorForLanguageModeling,
-                          DataCollatorForSeq2Seq)
+                          DataCollatorForSeq2Seq,
+                          DataCollatorWithPadding,
+                          T5EncoderModel)
 from rl4lms.envs.text_generation.utils_supervised import (get_datasets_for_causal,
                                                            get_datasets_for_seq2seq,
                                                            tokenize_causal,
@@ -232,7 +234,7 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
         logger.info(f"TrainingUtils: train_and_eval started")
         # evaluate on val and test set before fine-tuning once
         iter_start = self._trainer_state["current_iter"]
-        #self._evaluate_on_datapools(epoch=iter_start)
+        self._evaluate_on_datapools(epoch=iter_start)
 
         # train for given number of iters
         for epoch in range(iter_start, self._n_iters):
@@ -311,7 +313,7 @@ class SupervisedTrainer:
             preprocess_fn, batched=True,
             remove_columns=self._train_dataset.column_names)
         model_cls = AutoModelForCausalLM if self._alg_config[
-            "model_type"] == "causal" else AutoModelForSeq2SeqLM
+            "model_type"] == "causal" else T5EncoderModel
         self._gen_kwargs = self._alg_config["generation_kwargs"]
         self._model = model_cls.from_pretrained(self._alg_config["model_name"])
         self._model.parallelize()

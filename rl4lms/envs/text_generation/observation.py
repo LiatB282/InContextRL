@@ -83,7 +83,7 @@ class Observation:
 
         # update the action history
         current_action_history = deepcopy(self.action_history)
-        current_action_history.append(tokenizer._convert_id_to_token(action))
+        current_action_history.append(action)
 
         # get the current context
         current_prompt = deepcopy(self.prompt_or_input_encoded_pt)
@@ -95,7 +95,7 @@ class Observation:
         input_ids = torch.masked_select(input_ids, input_ids != 0)
         input_ids[-1] = 1713
         current_prompt = torch.masked_select(current_prompt, current_prompt != 0)
-        current_prompt = torch.cat([current_prompt, input_ids], dim=0)
+        current_prompt = torch.cat([input_ids, current_prompt], dim=0)
         
         #current_prompt_attention_mask = current_prompt != tokenizer.pad_token_id
 

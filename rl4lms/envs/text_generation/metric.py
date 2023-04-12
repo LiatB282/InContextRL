@@ -677,7 +677,7 @@ class ExactMatchMetric(BaseMetric):
 
         all_scores = []
         for prompt_text, ref_texts in zip(prompt_texts, reference_texts):
-            model_answer = self.qa_model.generate_answer(prompt_text)
+            model_answer = self._qa_model.generate_answer(prompt_text)
             score = 1 if check_answer_truthfulness(model_answer, ref_texts) else 0
             all_scores.append(score)
 

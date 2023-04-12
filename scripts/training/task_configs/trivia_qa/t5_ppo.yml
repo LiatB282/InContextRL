@@ -15,10 +15,10 @@ datapool:
     cache_path: /home/gamir/liat/cache
 
 env:
-  n_envs: 10
+  n_envs: 4
   args:
     max_prompt_length: 500
-    max_episode_length: 100
+    max_episode_length: 10
     terminate_on_eos: True
     prompt_truncation_side: "right"
     context_start_token: 0
@@ -50,7 +50,7 @@ alg:
         max_new_tokens: 1       
     
 train_evaluation:
-  eval_batch_size: 100
+  eval_batch_size: 10
   n_iters: 50
   eval_every: 10
   save_every: 1

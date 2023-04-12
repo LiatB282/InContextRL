@@ -16,6 +16,7 @@ import sys
 from sentence_transformers import SentenceTransformer
 import torch
 from transformers import AutoTokenizer
+from InstructorEmbedding import INSTRUCTOR
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -55,6 +56,7 @@ def gen_ctx_vectors(
     batch_size,
     model,
     tokenizer,
+    is_instructor,
     is_last=False
 ) -> List[Tuple[object, np.array]]:
     n = len(ctx_rows)
@@ -74,7 +76,14 @@ def gen_ctx_vectors(
         batch_rows = [ctx_rows[ind] for ind in batch_indices]
         batch_ids, batch_inputs = zip(*batch_rows)
         batch_ids = list(batch_ids)
-        encodings = torch.from_numpy(model.encode(batch_inputs))
+
+        if is_instructor:
+            instruction = "Represent the question answering example:"
+            encodings = model.encode([[instruction,sentence] for sentence in batch_inputs])
+        else:
+            encodings = model.encode(batch_inputs)
+
+        encodings = torch.from_numpy(encodings)
         tokenized = tokenizer.batch_encode_plus(list(batch_inputs), return_tensors="pt", padding='longest', max_length=512)['input_ids'].squeeze(0)
 
         out = torch.nn.functional.normalize(encodings, dim=1)
@@ -112,7 +121,11 @@ def main(args):
 
         os.makedirs(output_dir, exist_ok=True)
 
-        model = SentenceTransformer(args.model_name, cache_folder=args.cache_dir).to(args.device)
+        if args.use_instructor:
+            model = INSTRUCTOR('hkunlp/instructor-base')
+        else:
+            model = SentenceTransformer(args.model_name, cache_folder=args.cache_dir).to(args.device)
+        
         model.eval()
         tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir="/home/gamir/liat/cache")
 
@@ -135,7 +148,7 @@ def main(args):
                 rows = pickle.load(f)
 
             is_last = i == len(input_files) - 1
-            data = gen_ctx_vectors(rows, args.batch_size, model, tokenizer, is_last=is_last)
+            data = gen_ctx_vectors(rows, args.batch_size, model, tokenizer, args.use_instructor, is_last=is_last)
 
             assert not os.path.exists(out_file)
             logger.info("Writing results to %s" % out_file)
@@ -184,6 +197,12 @@ if __name__ == "__main__":
         "--model_name",
         type=str,
         default='sentence-transformers/gtr-t5-base'
+    )
+
+    parser.add_argument(
+        "--use_instructor",
+        action="store_true",
+        help="Use lexical enrichment"
     )
 
     args = parser.parse_args()

@@ -138,7 +138,7 @@ def wrap_onpolicy_alg(
                 gae_lambda=self.gae_lambda,
                 n_envs=1,
             )
-            self.reward_fn = self.env.get_attr("reward_function", 0)[0]
+            #self.reward_fn = self.env.get_attr("reward_function", 0)[0]
             self._retriever = retriever
 
         def get_policy_kwargs(
@@ -321,8 +321,8 @@ def wrap_onpolicy_alg(
             self, rollout_buffer, episode_wise_transitions, rollout_info
         ):
             # if the reward function is batchable, we override the rewards here
-            if isinstance(self.reward_fn, BatchedRewardFunction):
-                compute_batched_rewards(episode_wise_transitions, self.reward_fn)
+            # if isinstance(self.reward_fn, BatchedRewardFunction):
+            #     compute_batched_rewards(episode_wise_transitions, self.reward_fn)
 
             advantages_computed = False
             for ep_ix, transitions in enumerate(episode_wise_transitions):

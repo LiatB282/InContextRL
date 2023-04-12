@@ -3,7 +3,7 @@ import torch
 from gym.spaces import Discrete
 from gym.spaces.dict import Dict as DictSpace
 from torch import nn
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, T5EncoderModel
 from stable_baselines3.common.distributions import CategoricalDistribution
 from torch.distributions import Categorical
 from copy import deepcopy
@@ -79,12 +79,12 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         self.load_from_dict(state_dict)
 
     def _build_model_heads(self, model_name: str):
-        self._policy_model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        self._policy_model.__class__ = override_generation_routines(
-            type(self._policy_model)
-        )
+        self._policy_model = T5EncoderModel.from_pretrained(model_name)
+        # self._policy_model.__class__ = override_generation_routines(
+        #     type(self._policy_model)
+        # )
 
-        self._value_model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        self._value_model = T5EncoderModel.from_pretrained(model_name)
         self._ref_model = deepcopy(self._policy_model).eval()
 
         self._value_head = nn.Linear(
@@ -105,6 +105,11 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
                 self._value_head = torch.nn.DataParallel(
                     self._value_head.to(self.device)
                 )
+
+    def mean_pooling(self, model_output, attention_mask):
+        token_embeddings = model_output[0] #First element of model_output contains all token embeddings
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
     def generate_by_embeds(self,
         tokenizer: AutoTokenizer,
@@ -127,17 +132,21 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         finished_counter = 0
         max_top_queries = 100
 
-        decoder_input_ids = torch.tensor(tokenizer.pad_token_id).repeat(batch_size, 1).to(input_ids.device)
+        #decoder_input_ids = torch.tensor(tokenizer.pad_token_id).repeat(batch_size, 1).to(input_ids.device)
         for step in range(max_steps):
             if finished_counter == batch_size:
                 break
 
             outputs = self._policy_model(
-                input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids=decoder_input_ids, return_dict=True, output_hidden_states=True
+                input_ids=input_ids, attention_mask=attention_mask, return_dict=True#, output_hidden_states=True, decoder_input_ids=decoder_input_ids
             )
 
-            last_hidden_state = outputs['decoder_hidden_states'][-1].squeeze(1)
-            embeddings = torch.nn.functional.normalize(last_hidden_state, dim=1)
+            embeddings = self.mean_pooling(outputs, attention_mask)
+
+            #last_hidden_state = outputs['last_hidden_states'][-1].squeeze(1)
+
+            embeddings = torch.nn.functional.normalize(embeddings, dim=1)
+
             top_queries = retriever.get_top_docs(embeddings.cpu().detach().numpy(), max_top_queries + step + 1) #TODO: check that they are ordered
             rand_docs_vectors_list = []
             rand_docs_ids_list = []
@@ -265,13 +274,13 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
             encodings = tokenizer(
                 texts,
                 padding="max_length",
-                max_length=512,
+                max_length=500,
                 return_tensors="pt",
                 return_attention_mask=True,
                 truncation=True,
             )
-            input_ids = encodings.input_ids
-            attention_mask = encodings.attention_mask
+            input_ids = encodings.input_ids.cuda()
+            attention_mask = encodings.attention_mask.cuda()
             tokenizer.truncation_side = prev_truncation_side
 
         # if min_length argument is set and if policy is not a seq2seq LM (ie. causal LM)
@@ -336,16 +345,27 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         # attention_mask = input_ids != 0
         input_ids = obs["prompt_or_input_encoded_pt"].int()
         batch_size = input_ids.shape[0]
-        decoder_input_ids = torch.tensor(0, device=input_ids.device).repeat(batch_size, 1)
+        #decoder_input_ids = torch.tensor(0, device=input_ids.device).repeat(batch_size, 1)
 
         
         # and forward pass to get next token logits
-        outputs = self._policy_model(
-            input_ids=input_ids, attention_mask=obs["prompt_or_input_attention_mask_pt"], decoder_input_ids=decoder_input_ids, return_dict=True, output_hidden_states=True
-        )
+        # outputs = self._policy_model(
+        #     input_ids=input_ids, attention_mask=obs["prompt_or_input_attention_mask_pt"], decoder_input_ids=decoder_input_ids, return_dict=True, output_hidden_states=True
+        # )
 
-        last_hidden_state = outputs['decoder_hidden_states'][-1].squeeze(1)
-        embeddings = torch.nn.functional.normalize(last_hidden_state, dim=1)
+        # last_hidden_state = outputs['decoder_hidden_states'][-1].squeeze(1)
+        # embeddings = torch.nn.functional.normalize(last_hidden_state, dim=1)
+        attention_mask=obs["prompt_or_input_attention_mask_pt"]
+
+        outputs = self._policy_model(
+                input_ids=input_ids, attention_mask=attention_mask, return_dict=True#, output_hidden_states=True, decoder_input_ids=decoder_input_ids
+            )
+
+        embeddings = self.mean_pooling(outputs, attention_mask)
+
+        #last_hidden_state = outputs['last_hidden_states'][-1].squeeze(1)
+
+        embeddings = torch.nn.functional.normalize(embeddings, dim=1)
         
         scores = torch.bmm(embeddings.unsqueeze(1), doc_embeds.transpose(1,2).float()).squeeze(1)
 
@@ -383,63 +403,76 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         # Temp workaround for Seq2seq policy
         past_model_kwargs = None
 
-        if past_model_kwargs is None:
-            # 1. prepare model inputs
-            past_model_kwargs = {
-                "attention_mask": obs["prompt_or_input_attention_mask_pt"],
-            }
-            inputs_tensor, model_input_name, past_model_kwargs = unwrap_model(
-                self._value_model
-            )._prepare_model_inputs(
-                obs["prompt_or_input_encoded_pt"].int(), None, past_model_kwargs
+        # if past_model_kwargs is None:
+        #     # 1. prepare model inputs
+        #     past_model_kwargs = {
+        #         "attention_mask": obs["prompt_or_input_attention_mask_pt"],
+        #     }
+        #     inputs_tensor, model_input_name, past_model_kwargs = unwrap_model(
+        #         self._value_model
+        #     )._prepare_model_inputs(
+        #         obs["prompt_or_input_encoded_pt"].int(), None, past_model_kwargs
+        #     )
+
+        #     # 2. prepare encoder outputs
+        #     past_model_kwargs = unwrap_model(
+        #         self._value_model
+        #     )._prepare_encoder_decoder_kwargs_for_generation(
+        #         inputs_tensor, past_model_kwargs, model_input_name
+        #     )
+
+        #     # 3. Prepare input_ids for auto-regressive generation
+        #     input_ids = obs["context_encoded_pt"].int()
+        #     #decoder_attn_mask = obs["context_attention_mask_pt"]
+        # else:
+        #     input_ids = obs["context_encoded_pt"].int()
+        #     decoder_attn_mask = past_model_kwargs.pop("decoder_attention_mask")
+
+        # # all set to get into auto-regressive mode
+        # # prepare all of the model inputs for the decoder
+        # batch_size = input_ids.shape[0]
+        # model_inputs = unwrap_model(self._value_model).prepare_inputs_for_generation(
+        #     input_ids, **past_model_kwargs
+        # )
+
+        input_ids = obs["prompt_or_input_encoded_pt"].int()
+        attention_mask = obs["prompt_or_input_attention_mask_pt"]
+
+        outputs = self._value_model(
+                input_ids=input_ids, attention_mask=attention_mask, return_dict=True#, output_hidden_states=True, decoder_input_ids=decoder_input_ids
             )
 
-            # 2. prepare encoder outputs
-            past_model_kwargs = unwrap_model(
-                self._value_model
-            )._prepare_encoder_decoder_kwargs_for_generation(
-                inputs_tensor, past_model_kwargs, model_input_name
-            )
+        embeddings = self.mean_pooling(outputs, attention_mask)
 
-            # 3. Prepare input_ids for auto-regressive generation
-            input_ids = obs["context_encoded_pt"].int()
-            #decoder_attn_mask = obs["context_attention_mask_pt"]
-        else:
-            input_ids = obs["context_encoded_pt"].int()
-            decoder_attn_mask = past_model_kwargs.pop("decoder_attention_mask")
+        #last_hidden_state = outputs['last_hidden_states'][-1].squeeze(1)
 
-        # all set to get into auto-regressive mode
-        # prepare all of the model inputs for the decoder
-        batch_size = input_ids.shape[0]
-        model_inputs = unwrap_model(self._value_model).prepare_inputs_for_generation(
-            input_ids, **past_model_kwargs
-        )
+        #embeddings = torch.nn.functional.normalize(embeddings, dim=1)
 
 
-        model_inputs["decoder_input_ids"] = torch.tensor(0, device=input_ids.device).repeat(batch_size, 1)
+        #model_inputs["decoder_input_ids"] = torch.tensor(0, device=input_ids.device).repeat(batch_size, 1)
 
         # and forrward pass to get hidden states
-        outputs = self._value_model(
-            **model_inputs,
-            output_hidden_states=True,
-            #decoder_attention_mask=decoder_attn_mask,
-            return_dict=True
-        )
+        # outputs = self._value_model(
+        #     **model_inputs,
+        #     output_hidden_states=True,
+        #     #decoder_attention_mask=decoder_attn_mask,
+        #     return_dict=True
+        # )
 
-        # get decoder's last hidden state
-        last_tokens_hidden = outputs.decoder_hidden_states[-1][:, -1, :].to(self.device)
-        values = self._value_head.forward(last_tokens_hidden)
+        # # get decoder's last hidden state
+        # last_tokens_hidden = outputs.decoder_hidden_states[-1][:, -1, :].to(self.device)
+        values = self._value_head.forward(embeddings)
 
         # update the model kwargs for further generation
-        past_model_kwargs = unwrap_model(
-            self._value_model
-        )._update_model_kwargs_for_generation(
-            outputs,
-            past_model_kwargs,
-            is_encoder_decoder=unwrap_model(
-                self._value_model
-            ).config.is_encoder_decoder,
-        )
+        # past_model_kwargs = unwrap_model(
+        #     self._value_model
+        # )._update_model_kwargs_for_generation(
+        #     outputs,
+        #     past_model_kwargs,
+        #     is_encoder_decoder=unwrap_model(
+        #         self._value_model
+        #     ).config.is_encoder_decoder,
+        # )
         # past_model_kwargs["decoder_attention_mask"] = torch.cat(
         #     (decoder_attn_mask, torch.ones(batch_size, 1).to(decoder_attn_mask.device)),
         #     dim=-1,
@@ -478,49 +511,59 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         model_kwarpast_model_kwargsgs: Dict[str, Any] = None
     ) -> RefPolicyOutput:
         # Temp workaround for Seq2seq policy
-        past_model_kwargs = None
+        # past_model_kwargs = None
 
-        if past_model_kwargs is None:
-            # 1. prepare model inputs
-            past_model_kwargs = {
-                "attention_mask": obs["prompt_or_input_attention_mask_pt"],
-            }
-            inputs_tensor, model_input_name, past_model_kwargs = unwrap_model(
-                self._ref_model
-            )._prepare_model_inputs(
-                obs["prompt_or_input_encoded_pt"].int(), None, past_model_kwargs
-            )
+        # if past_model_kwargs is None:
+        #     # 1. prepare model inputs
+        #     past_model_kwargs = {
+        #         "attention_mask": obs["prompt_or_input_attention_mask_pt"],
+        #     }
+        #     inputs_tensor, model_input_name, past_model_kwargs = unwrap_model(
+        #         self._ref_model
+        #     )._prepare_model_inputs(
+        #         obs["prompt_or_input_encoded_pt"].int(), None, past_model_kwargs
+        #     )
 
-            # 2. prepare encoder outputs
-            past_model_kwargs = unwrap_model(
-                self._ref_model
-            )._prepare_encoder_decoder_kwargs_for_generation(
-                inputs_tensor, past_model_kwargs, model_input_name
-            )
+        #     # 2. prepare encoder outputs
+        #     past_model_kwargs = unwrap_model(
+        #         self._ref_model
+        #     )._prepare_encoder_decoder_kwargs_for_generation(
+        #         inputs_tensor, past_model_kwargs, model_input_name
+        #     )
 
-            # 3. Prepare input_ids for auto-regressive generation
-            input_ids = obs["context_encoded_pt"].int()
-            #decoder_attn_mask = obs["context_attention_mask_pt"]
-        else:
-            input_ids = obs["context_encoded_pt"].int()
-            decoder_attn_mask = past_model_kwargs.pop("decoder_attention_mask")
+        #     # 3. Prepare input_ids for auto-regressive generation
+        #     input_ids = obs["context_encoded_pt"].int()
+        #     #decoder_attn_mask = obs["context_attention_mask_pt"]
+        # else:
+        #     input_ids = obs["context_encoded_pt"].int()
+        #     decoder_attn_mask = past_model_kwargs.pop("decoder_attention_mask")
 
-        # all set to get into auto-regressive mode
-        # prepare all of the model inputs for the decoder
-        batch_size = input_ids.shape[0]
-        model_inputs = unwrap_model(self._ref_model).prepare_inputs_for_generation(
-            input_ids, **past_model_kwargs
-        )
+        # # all set to get into auto-regressive mode
+        # # prepare all of the model inputs for the decoder
+        # batch_size = input_ids.shape[0]
+        # model_inputs = unwrap_model(self._ref_model).prepare_inputs_for_generation(
+        #     input_ids, **past_model_kwargs
+        # )
 
-        model_inputs["decoder_input_ids"] = torch.tensor(0, device=input_ids.device).repeat(batch_size, 1)
+        # model_inputs["decoder_input_ids"] = torch.tensor(0, device=input_ids.device).repeat(batch_size, 1)
 
-        # and forward pass to get next token logits
+        # # and forward pass to get next token logits
+        # outputs = self._ref_model(
+        #     **model_inputs, return_dict=True, output_hidden_states=True
+        # )
+
+        # last_hidden_state = outputs['decoder_hidden_states'][-1].squeeze(1)
+
+        input_ids = obs["prompt_or_input_encoded_pt"].int()
+        attention_mask = obs["prompt_or_input_attention_mask_pt"]
+
         outputs = self._ref_model(
-            **model_inputs, return_dict=True, output_hidden_states=True
-        )
+                input_ids=input_ids, attention_mask=attention_mask, return_dict=True#, output_hidden_states=True, decoder_input_ids=decoder_input_ids
+            )
 
-        last_hidden_state = outputs['decoder_hidden_states'][-1].squeeze(1)
-        embeddings = torch.nn.functional.normalize(last_hidden_state, dim=1)
+        embeddings = self.mean_pooling(outputs, attention_mask)
+
+        embeddings = torch.nn.functional.normalize(embeddings, dim=1)
         
         scores = torch.bmm(embeddings.unsqueeze(1), doc_embeds.transpose(1,2)).squeeze(1)
 
@@ -529,13 +572,13 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         log_prob = dist.log_prob(action_idx)
 
         # update the model kwargs for further generation
-        past_model_kwargs = unwrap_model(
-            self._ref_model
-        )._update_model_kwargs_for_generation(
-            outputs,
-            past_model_kwargs,
-            is_encoder_decoder=unwrap_model(self._ref_model).config.is_encoder_decoder,
-        )
+        # past_model_kwargs = unwrap_model(
+        #     self._ref_model
+        # )._update_model_kwargs_for_generation(
+        #     outputs,
+        #     past_model_kwargs,
+        #     is_encoder_decoder=unwrap_model(self._ref_model).config.is_encoder_decoder,
+        # )
         # past_model_kwargs["decoder_attention_mask"] = torch.cat(
         #     (decoder_attn_mask, torch.ones(batch_size, 1).to(decoder_attn_mask.device)),
         #     dim=-1,

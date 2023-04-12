@@ -111,7 +111,8 @@ def generate_text(
     prompt_texts = [
         dt_control_token + sample.prompt_or_input_text for sample in samples
     ]
+    query_ids = [int(sample.id.split('_')[1]) for sample in samples]
     generated_texts = policy.generate(
-        tokenizer, prompt_texts, max_prompt_length, gen_kwargs=gen_kwargs, retriever=retriever
+        tokenizer, prompt_texts, query_ids, 10, None, gen_kwargs=gen_kwargs, retriever=retriever
     ).gen_texts
     return generated_texts
