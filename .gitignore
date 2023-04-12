@@ -274,3 +274,6 @@ home/gamir/liat/cache/*
 preprocessed_data/*
 data_embeddings/*
 data_embeddings_debug/*
+scripts/training/IN_CONTEXT_RL/*
+scripts/training/slurm_logs/*
+IN_CONTEXT_RL/*

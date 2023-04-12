@@ -42,6 +42,7 @@ logger.addHandler(console)
 class TransitionInfo:
     observation: TensorDict
     action: np.ndarray
+    action_idx: np.ndarray
     task_reward: np.ndarray
     total_reward: np.ndarray
     kl_div: np.ndarray
@@ -144,6 +145,7 @@ def wrap_onpolicy_alg(
             self,
             obs: TensorDict,
             action: torch.tensor,
+            actions_idx: torch.tensor,
             past_state: Dict[str, torch.tensor],
             action_mask: torch.tensor,
             embeds: torch.tensor,
@@ -152,6 +154,7 @@ def wrap_onpolicy_alg(
             policy_kwargs = {
                 "obs": obs,
                 "actions": action,
+                "actions_idx": actions_idx,
                 "doc_embeds": embeds,
                 "past_model_kwargs": past_state,
             }
@@ -199,8 +202,8 @@ def wrap_onpolicy_alg(
                 else [None] * len(gen_output.step_wise_logprobs)
             )
 
-            for actions_tensor, _, action_mask, embeds, doc_ids in zip(
-                gen_output.step_wise_actions, gen_output.step_wise_logprobs, masks, gen_output.doc_embeds, gen_output.doc_ids
+            for actions_tensor, actions_idx_tensor, _, action_mask, embeds, doc_ids in zip(
+                gen_output.step_wise_actions, gen_output.step_wise_actions_idx, gen_output.step_wise_logprobs, masks, gen_output.doc_embeds, gen_output.doc_ids
             ):
                 # if all episodes are done, just break and do not continue
                 if np.all(ep_terminated):
@@ -212,7 +215,7 @@ def wrap_onpolicy_alg(
 
                     # get log probs (TBD: generalize this a bit)
                     policy_kwargs = self.get_policy_kwargs(
-                        obs_tensor, actions_tensor, policy_past_state, action_mask, embeds
+                        obs_tensor, actions_tensor, actions_idx_tensor, policy_past_state, action_mask, embeds
                     )
 
                     policy_outputs: PolicyOutput = self.policy.forward_policy(
@@ -246,7 +249,7 @@ def wrap_onpolicy_alg(
                     # get reference log probs
                     ref_policy_outputs: RefPolicyOutput = (
                         self.policy.get_log_probs_ref_model(
-                            obs_tensor, actions_tensor, embeds, ref_past_state
+                            obs_tensor, actions_tensor, actions_idx_tensor, embeds, ref_past_state
                         )
                     )
                     ref_log_probs, ref_past_state = (
@@ -281,7 +284,8 @@ def wrap_onpolicy_alg(
                     if not ep_terminated[env_ix]:
                         transtion = TransitionInfo(
                             observation=unpacked_obs[env_ix],
-                            action=actions[env_ix], #TODO: check
+                            action=actions[env_ix],
+                            action_idx=actions_idx_tensor.cpu().numpy()[env_ix],
                             task_reward=rewards[env_ix],
                             total_reward=total_rewards[env_ix],
                             kl_div=kl_div.cpu().numpy()[env_ix],
@@ -343,6 +347,7 @@ def wrap_onpolicy_alg(
                             transition.episode_start,
                             transition.value,
                             transition.log_prob,
+                            action_idx=transition.action_idx,
                             embeds=transition.embeds,
                             action_masks=transition.action_mask
                         )

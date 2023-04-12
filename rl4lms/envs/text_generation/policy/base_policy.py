@@ -43,6 +43,7 @@ class PolicyOutput:
 
     # chosen actions by policy
     actions: torch.tensor
+    actions_idx: torch.tensor
     # raw log probs corresponding to chosen actions
     raw_log_probs: torch.tensor
     # processed log probs (eg: after action masking) for chosen actions
@@ -91,6 +92,7 @@ class GenerationOutputs:
     step_wise_logprobs: List[List[torch.tensor]]
     # actions at each time step
     step_wise_actions: List[torch.tensor]
+    step_wise_actions_idx: List[torch.tensor]
     # generated texts
     gen_texts: List[str]
     # action masks

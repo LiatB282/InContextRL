@@ -34,6 +34,15 @@ import sys
 import os
 import numpy
 
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+if logger.hasHandlers():
+    logger.handlers.clear()
+console = logging.StreamHandler()
+logger.addHandler(console)
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from index_utils.retriever import DenseRetriever
@@ -111,6 +120,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         actions = [[] for _ in range(batch_size)]
         step_wise_logprobs = []
         step_wise_actions = []
+        step_wise_actions_idx = []
         all_doc_embeds = []
         all_doc_ids = []
         finished = [False for _ in range(batch_size)]
@@ -195,22 +205,32 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
             all_scores = torch.cat([rand_docs_scores, top_scores_tensor], dim=1) 
             all_actions = [l1 + l2 for l1, l2 in zip(rand_docs_ids_list, top_docs_ids_list)]
             all_actions = torch.tensor(all_actions, device=input_ids.device)
-            all_vectors = torch.cat([rand_docs_tensor, top_docs_tensor], dim=1) #check
+            all_vectors = torch.cat([rand_docs_tensor, top_docs_tensor], dim=1)
 
             input_ids = torch.nn.utils.rnn.pad_sequence(input_ids_list, batch_first=True)
             attention_mask = input_ids != tokenizer.pad_token_id    
 
-            all_logprobs = torch.log_softmax(all_scores, dim=1)
-            logprobs, current_actions = torch.max(all_logprobs, dim=1)
-            step_wise_logprobs.append(logprobs)
-            step_wise_actions.append(current_actions)
+            # all_logprobs = torch.log_softmax(all_scores, dim=1)
+            # logprobs, current_actions_indices = torch.max(all_logprobs, dim=1)
+            # current_actions = torch.gather(all_actions, current_actions_indices, dim=1)
+            # step_wise_logprobs.append(logprobs)
+            # step_wise_actions.append(current_actions)
             all_doc_ids.append(all_actions)
             all_doc_embeds.append(all_vectors)
 
+            actions_idx_at_step = torch.argmax(all_scores, dim=1)
+            distribution = Categorical(logits=all_scores)
+            log_probs = distribution.log_prob(actions_idx_at_step)
+            step_wise_logprobs.append(log_probs)
+            actions_at_step = torch.gather(all_actions, 1, actions_idx_at_step.unsqueeze(1)).squeeze(1)
+            step_wise_actions.append(actions_at_step)
+            step_wise_actions_idx.append(actions_idx_at_step)
+
         texts = tokenizer.batch_decode(input_ids, skip_special_tokens=True)
+        logger.info(f"Generated text = {texts[0]}")
 
         gen_output = GenerationOutputs(
-            step_wise_logprobs, step_wise_actions, texts, doc_ids=all_doc_ids, doc_embeds=all_doc_embeds
+            step_wise_logprobs, step_wise_actions, step_wise_actions_idx, texts, doc_ids=all_doc_ids, doc_embeds=all_doc_embeds
         )
         return gen_output
 
@@ -272,6 +292,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         self,
         obs: TensorDict,
         actions: torch.tensor,
+        actions_idx: torch.tensor,
         doc_embeds: torch.tensor,
         past_model_kwargs: Optional[Dict[str, torch.tensor]] = None
     ) -> PolicyOutput:
@@ -330,7 +351,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
 
         # get log probs
         dist = self._action_dist.proba_distribution(action_logits=scores)
-        log_prob = dist.log_prob(actions)
+        log_prob = dist.log_prob(actions_idx)
         entropy = dist.entropy()
 
         # update the model kwargs for further generation
@@ -349,7 +370,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         # )
 
         policy_output = PolicyOutput(
-            actions, log_prob, log_prob, entropy, None
+            actions, actions_idx, log_prob, log_prob, entropy, None
         )
 
         return policy_output
@@ -428,10 +449,10 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         return value_output
 
     def evaluate_actions(
-        self, obs: torch.Tensor, actions: torch.Tensor, embeds: torch.Tensor
+        self, obs: torch.Tensor, actions: torch.Tensor, actions_idx: torch.Tensor, embeds: torch.Tensor
     ) -> EvaluateActionsOutput:
 
-        policy_outputs = self.forward_policy(obs=obs, actions=actions, doc_embeds=embeds.reshape(-1, 200, 768))
+        policy_outputs = self.forward_policy(obs=obs, actions=actions, actions_idx=actions_idx, doc_embeds=embeds.reshape(-1, 200, 768))
         value_outputs = self.forward_value(obs)
 
         eval_outputs = EvaluateActionsOutput(
@@ -452,6 +473,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         self,
         obs: TensorDict,
         action: torch.tensor,
+        action_idx: torch.tensor,
         doc_embeds: torch.tensor,
         model_kwarpast_model_kwargsgs: Dict[str, Any] = None
     ) -> RefPolicyOutput:
@@ -504,7 +526,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
 
         # get log probs
         dist = self._action_dist.proba_distribution(action_logits=scores)
-        log_prob = dist.log_prob(action)
+        log_prob = dist.log_prob(action_idx)
 
         # update the model kwargs for further generation
         past_model_kwargs = unwrap_model(
@@ -692,7 +714,7 @@ class MaskedSeq2SeqLMActorCriticPolicy(
         return policy_output
 
     def evaluate_actions(
-        self, obs: torch.Tensor, actions: torch.Tensor, action_masks: torch.Tensor
+        self, obs: torch.Tensor, actions: torch.Tensor, actions_idx: torch.Tensor, action_masks: torch.Tensor
     ) -> EvaluateActionsOutput:
 
         policy_outputs = self.forward_policy(

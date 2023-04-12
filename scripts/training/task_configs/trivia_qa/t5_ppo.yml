@@ -12,11 +12,12 @@ datapool:
   args:
     is_debug: False
     encoded_dataset_path: /home/gamir/liat/InContextRL/data_embeddings/SPLIT/encoded_passages_*.pkl
+    cache_path: /home/gamir/liat/cache
 
 env:
   n_envs: 10
   args:
-    max_prompt_length: 512
+    max_prompt_length: 500
     max_episode_length: 100
     terminate_on_eos: True
     prompt_truncation_side: "right"
@@ -25,8 +26,8 @@ env:
 alg:
   id: ppo
   args: 
-    n_steps: 512
-    batch_size: 64
+    n_steps: 128
+    batch_size: 32
     verbose: 1
     learning_rate: 0.000002
     n_epochs: 5
@@ -50,7 +51,7 @@ alg:
     
 train_evaluation:
   eval_batch_size: 100
-  n_iters: 100
+  n_iters: 50
   eval_every: 10
   save_every: 1
   metrics:

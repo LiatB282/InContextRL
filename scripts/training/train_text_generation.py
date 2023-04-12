@@ -2,6 +2,10 @@ import os
 from argparse import ArgumentParser
 
 import yaml
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from rl4lms.envs.text_generation.logging_utils import Tracker
 from rl4lms.envs.text_generation.training_utils import (

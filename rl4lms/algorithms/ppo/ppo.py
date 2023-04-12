@@ -14,6 +14,7 @@ from rl4lms.envs.text_generation.logging_utils import Tracker
 from rl4lms.envs.text_generation.policy.base_policy import EvaluateActionsOutput
 import logging
 import time
+from tqdm import tqdm
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -209,12 +210,12 @@ class PPO(OnPolicyAlgorithm):
 
         # train for n_epochs epochs
         for epoch in range(self.n_epochs):
-            logger.info(f"PPO: training epoch {epoch} / {self.n_epochs}")
+            logger.info(f"PPO: training epoch {epoch+1} / {self.n_epochs}")
             epoch_start_time = time.time()
 
             approx_kl_divs = []
             # Do a complete pass on the rollout buffer
-            for batch_ix, rollout_data in enumerate(list(self.rollout_buffer.get(self.batch_size))):
+            for batch_ix, rollout_data in tqdm(enumerate(list(self.rollout_buffer.get(self.batch_size)))):
                 #batch_start_time = time.time()
 
                 # self.verify_rollout_data(rollout_data)
@@ -229,9 +230,9 @@ class PPO(OnPolicyAlgorithm):
 
                 actions_start_time = time.time()
                 evaluation_output: EvaluateActionsOutput = self.policy.evaluate_actions(
-                    rollout_data.observations, actions, rollout_data.embeds)
+                    rollout_data.observations, actions, rollout_data.action_idx.long().flatten(), rollout_data.embeds)
                 values, log_prob, entropy = evaluation_output.values, evaluation_output.log_prob, evaluation_output.entropy
-                logger.info(f"Evaluating actions took {time.time()-actions_start_time:.1f} seconds")
+                #logger.info(f"Evaluating actions took {time.time()-actions_start_time:.1f} seconds")
                 
                 values = values.flatten()
                 # Normalize advantage

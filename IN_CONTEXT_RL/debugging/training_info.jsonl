@@ -1,1 +1,1 @@
-{"ppo/entropy_loss": -5.297584519386292, "ppo/policy_gradient_loss": -0.036821763888001444, "ppo/value_loss": 0.01766895491629839, "ppo/approx_kl": 0.0034771026112139225}
+{"ppo/entropy_loss": -5.297505431175232, "ppo/policy_gradient_loss": -0.031314992303960024, "ppo/value_loss": 0.01986769225972239, "ppo/approx_kl": 0.0026505712885409594}

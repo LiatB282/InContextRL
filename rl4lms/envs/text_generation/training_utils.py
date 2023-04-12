@@ -75,6 +75,7 @@ def build_metrics(metric_configs: List[Dict[str, Any]], qa_model: GeneralQAModel
 def build_datapool(datapool_config: Dict[str, Any]):
 
     def _get_datapool_by_split(split: str):
+        logger.info(f"TrainingUtils: Building data pool: {split}")
         kwargs = datapool_config.get("args", {})
         kwargs["split"] = split
         dp_split = DataPoolRegistry.get(datapool_config["id"], kwargs)
@@ -98,6 +99,7 @@ def build_env(env_config: Dict[str, Any],
               tokenizer: AutoTokenizer,
               train_samples: List[Sample],
               retriever: DenseRetriever):
+    logger.info(f"TrainingUtils: Building env")
     # vectoried env
     env_kwargs = {
         "reward_function": reward_fn,
@@ -120,6 +122,7 @@ def build_alg(alg_config: Dict[str, Any],
               policy_state: Dict[str, Any],
               alg_state: Dict[str, Any],
               retriever: DenseRetriever = None):
+    logger.info(f"TrainingUtils: Building alg")
     # TBD - move these to a registry once the experimentation is done
     # Also switch to Sb3 algos when possible with minimal code adaptations
     policy_config = alg_config["policy"]
@@ -212,6 +215,7 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
     def _evaluate_on_datapools(self, epoch: int,
                                splits: List[str] = ["val", "test"]):
         for split in splits:
+            logger.info(f"TrainingUtils: evaluting split: {split}")
             evaluate_on_samples(policy=self._alg.policy,
                                 tokenizer=self._tokenizer,
                                 samples=self._samples_by_split[split],
@@ -225,6 +229,7 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
                                 retriever=self._retrievers[split])
 
     def train_and_eval(self):
+        logger.info(f"TrainingUtils: train_and_eval started")
         # evaluate on val and test set before fine-tuning once
         iter_start = self._trainer_state["current_iter"]
         #self._evaluate_on_datapools(epoch=iter_start)
