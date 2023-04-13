@@ -53,7 +53,7 @@ class TriviaQAPool(TextGenPool):
     def prepare(cls, split: str, encoded_dataset_path:str=None, is_debug:bool=False, cache_path:str=None):
         hf_split = split if split in ['train', 'test'] else 'validation'
         dataset = load_dataset('trivia_qa', 'rc', split=hf_split, cache_dir=cache_path)
-        if is_debug:
+        if is_debug and split == "train":
             dataset = [dataset[i] for i in range(1000)]
         samples = []
         for ix, item in enumerate(dataset):

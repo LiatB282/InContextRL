@@ -73,7 +73,7 @@ class MaskableRolloutBuffer(RolloutBuffer):
         self.action_masks = np.ones(
             (self.buffer_size, self.n_envs, self.mask_dims), dtype=np.float32)
         self.embeds = np.ones(
-            (self.buffer_size, self.n_envs, 768*200), dtype=np.float32)
+            (self.buffer_size, self.n_envs, 768*1100), dtype=np.float32)
         self.action_idx = np.ones(
             (self.buffer_size, self.n_envs, 1), dtype=np.float32)
 
@@ -134,7 +134,7 @@ class MaskableRolloutBuffer(RolloutBuffer):
             self.returns[batch_inds].flatten(),
             self.action_masks[batch_inds].reshape(-1, self.mask_dims),
             self.action_idx[batch_inds].reshape(-1, 1),
-            self.embeds[batch_inds].reshape(-1, 768*200),
+            self.embeds[batch_inds].reshape(-1, 768*1100),
         )
         return MaskableRolloutBufferSamples(*map(self.to_torch, data))
 
@@ -195,7 +195,7 @@ class MaskableDictRolloutBuffer(DictRolloutBuffer):
         self.action_masks = np.ones(
             (self.buffer_size, self.n_envs, self.mask_dims))  # .to(self.device)
         self.embeds = np.ones(
-            (self.buffer_size, self.n_envs, 768*200))
+            (self.buffer_size, self.n_envs, 768*1100))
         self.action_idx = np.ones(
             (self.buffer_size, self.n_envs, 1))
 
@@ -258,5 +258,5 @@ class MaskableDictRolloutBuffer(DictRolloutBuffer):
             action_idx=self.to_torch(
                 self.action_idx[batch_inds].reshape(-1, 1)),
             embeds=self.to_torch(
-                self.embeds[batch_inds].reshape(-1, 768*200)),
+                self.embeds[batch_inds].reshape(-1, 768*1100)),
         )

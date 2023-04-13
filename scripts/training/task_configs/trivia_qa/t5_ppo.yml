@@ -11,13 +11,13 @@ datapool:
   id: trivia_qa
   args:
     is_debug: False
-    encoded_dataset_path: /home/gamir/liat/InContextRL/data_embeddings/SPLIT/encoded_passages_*.pkl
+    encoded_dataset_path: /home/gamir/liat/InContextRL/data_embeddings/train/encoded_passages_*.pkl
     cache_path: /home/gamir/liat/cache
 
 env:
   n_envs: 4
   args:
-    max_prompt_length: 500
+    max_prompt_length: 700
     max_episode_length: 10
     terminate_on_eos: True
     prompt_truncation_side: "right"
@@ -47,8 +47,7 @@ alg:
         top_k: 0
         temperature: 0
         min_length: 1
-        max_new_tokens: 1       
-    
+        max_new_tokens: 1
 train_evaluation:
   eval_batch_size: 10
   n_iters: 50

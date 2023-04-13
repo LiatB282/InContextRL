@@ -609,26 +609,64 @@ class IntentAccuracy(BatchedRewardFunction):
         rewards[done_ixs] += self._intent_coeff * np.array(scores)
         return rewards.tolist()
 
+class DummyRewardFunction(RewardFunction):
+    def __init__(self) -> None:
+        super().__init__()
 
-class OurRewardFunction(RewardFunction):
+    def __call__(
+            self,
+            prompt_texts: List[str],
+            gen_texts: List[str],
+            ref_texts: List[List[str]],
+            dones: List[bool],
+            meta_info: Dict[str, Any] = None,
+        ) -> List[float]: 
+            return 0
+            
+
+class OurRewardFunction(BatchedRewardFunction):
     def __init__(self, qa_model : GeneralQAModel) -> None:
         super().__init__()
         self._metric = ExactMatchMetric(qa_model)
 
     def __call__(
-        self,
-        current_observation: Observation,
-        action: int,
-        next_observation: Observation,
-        done: bool,
-        meta_info: Dict[str, Any] = None,
-    ) -> float:
-        curr_prompt_text = next_observation.prompt_or_input_text
-        if done:
-            return self._metric.compute([curr_prompt_text], None, [next_observation.target_or_reference_texts])["semantic/exact_match"][1]
-        else:
-            number_of_incontext_examples = curr_prompt_text.count('Question:') - 1
-            return -math.pow(0.5, number_of_incontext_examples + 1)
+            self,
+            prompt_texts: List[str],
+            gen_texts: List[str],
+            ref_texts: List[List[str]],
+            dones: List[bool],
+            meta_info: Dict[str, Any] = None,
+        ) -> List[float]:
+            if all(dones):
+                return self._metric.compute(None, prompt_texts, ref_texts)["semantic/exact_match"][0]
+
+            rewards = []    
+            for ix, (prompt, gen, ref, done) in enumerate(
+                zip(prompt_texts, gen_texts, ref_texts, dones)
+            ):
+                if done:
+                    reward = self._metric.compute(None, [prompt], [ref])["semantic/exact_match"][1]
+                else:
+                    number_of_incontext_examples = prompt.count('Question:') - 1
+                    reward = -math.pow(0.5, number_of_incontext_examples + 1)
+
+                rewards.append(reward)
+            return rewards
+            
+    # def __call__(
+    #     self,
+    #     current_observation: Observation,
+    #     action: int,
+    #     next_observation: Observation,
+    #     done: bool,
+    #     meta_info: Dict[str, Any] = None,
+    # ) -> float:
+    #     curr_prompt_text = next_observation.prompt_or_input_text
+    #     if done:
+    #         return self._metric.compute([curr_prompt_text], None, [next_observation.target_or_reference_texts])["semantic/exact_match"][1]
+    #     else:
+    #         number_of_incontext_examples = curr_prompt_text.count('Question:') - 1
+    #         return -math.pow(0.5, number_of_incontext_examples + 1)
 
 if __name__ == "__main__":
     predictions = "hello there general kenobi"

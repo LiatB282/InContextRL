@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from index_utils.retriever import DenseRetriever
 
-FULL_SIZE = 500
+FULL_SIZE = 700
 
 @dataclass
 class Observation:
@@ -95,7 +95,7 @@ class Observation:
         input_ids = torch.masked_select(input_ids, input_ids != 0)
         input_ids[-1] = 1713
         current_prompt = torch.masked_select(current_prompt, current_prompt != 0)
-        current_prompt = torch.cat([input_ids, current_prompt], dim=0)
+        current_prompt = torch.cat([input_ids.to(current_prompt.device), current_prompt], dim=0)
         
         #current_prompt_attention_mask = current_prompt != tokenizer.pad_token_id
 

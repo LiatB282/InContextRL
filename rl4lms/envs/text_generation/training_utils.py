@@ -35,6 +35,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from rl4lms.qa_models.general_qa_model import GeneralQAModel
+from rl4lms.envs.text_generation.reward import DummyRewardFunction
 
 from index_utils.retriever import DenseRetriever
 
@@ -123,7 +124,8 @@ def build_alg(alg_config: Dict[str, Any],
               tracker: Tracker,
               policy_state: Dict[str, Any],
               alg_state: Dict[str, Any],
-              retriever: DenseRetriever = None):
+              retriever: DenseRetriever = None,
+              reward_fn: RewardFunction = None):
     logger.info(f"TrainingUtils: Building alg")
     # TBD - move these to a registry once the experimentation is done
     # Also switch to Sb3 algos when possible with minimal code adaptations
@@ -144,7 +146,8 @@ def build_alg(alg_config: Dict[str, Any],
                   alg_config["kl_div"]["coeff"], tracker,
                   alg_config["kl_div"].get("target_kl", None),
                   alg_config["kl_div"].get("norm_reward", False), 
-                  retriever)
+                  retriever,
+                  reward_fn)
     alg.load_from_dict(alg_state)
     return alg
 
@@ -184,35 +187,33 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
         self._reward_fn = build_reward_fn(self._reward_config, qa_model)
         self._metrics = build_metrics(
             self._train_eval_config.get("metrics", []), qa_model)
-        self._retrievers = self.init_retrievers()
+        self._retriever = self.init_retriever()
         self._samples_by_split = build_datapool(
             self._datapool_config)
-        self._env = build_env(self._env_config, self._reward_fn,
+        self._env = None
+        self._env = build_env(self._env_config, DummyRewardFunction(),
                               self._tokenizer, self._samples_by_split["train"],
-                              self._retrievers['train'])
+                              self._retriever)
         self._alg = build_alg(self._on_policy_alg_config,
                               self._env, self._tracker,
                               self._policy_state_dict,
                               self._alg_state_dict,
-                              self._retrievers['train'])
+                              self._retriever,
+                              self._reward_fn)
 
         # extract train params
         self._max_episode_length = self._env_config["args"]["max_episode_length"]
         self._max_prompt_length = self._env_config["args"]["max_prompt_length"]
         self._eval_batch_size = self._train_eval_config["eval_batch_size"]
         self._n_iters = int(self._train_eval_config["n_iters"])
-        self._n_steps_per_iter = self._env.num_envs * self._alg.n_steps
+        #self._n_steps_per_iter = self._env.num_envs * self._alg.n_steps
 
         # gen kwargs for evaluation (if it is different from rollout gen kwargs)
         self._eval_gen_kwargs = self._train_eval_config.get(
             "generation_kwargs", None)
         
-    def init_retrievers(self):
-        retrievers = { }
-        for split in ["train", "val", "test"]:
-            split_hf = split if split != "val" else "validation"
-            retrievers[split] = DenseRetriever(ctx_files_pattern=self._datapool_config['args']['encoded_dataset_path'].replace("SPLIT", split_hf))
-        return retrievers
+    def init_retriever(self):
+        return DenseRetriever(ctx_files_pattern=self._datapool_config['args']['encoded_dataset_path'])
 
     def _evaluate_on_datapools(self, epoch: int,
                                splits: List[str] = ["val", "test"]):
@@ -228,7 +229,7 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
                                 split_name=split,
                                 tracker=self._tracker,
                                 gen_kwargs=self._eval_gen_kwargs,
-                                retriever=self._retrievers[split])
+                                retriever=self._retriever)
 
     def train_and_eval(self):
         logger.info(f"TrainingUtils: train_and_eval started")
@@ -252,8 +253,8 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
                     self._tracker, self._alg.policy, self._trainer_state)
 
             # evaluate on val set in the given intervals
-            if (epoch + 1) % self._train_eval_config["eval_every"] == 0:
-                self._evaluate_on_datapools(epoch=epoch, splits=["val"])
+            # if (epoch + 1) % self._train_eval_config["eval_every"] == 0:
+            #     self._evaluate_on_datapools(epoch=epoch, splits=["val"])
 
         # finally evaluate on val and test samples
         self._evaluate_on_datapools(epoch=epoch)

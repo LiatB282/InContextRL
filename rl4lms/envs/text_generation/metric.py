@@ -18,6 +18,7 @@ import copy
 import rouge
 from rl4lms.qa_models.evaluation import check_answer_truthfulness
 from rl4lms.qa_models.general_qa_model import GeneralQAModel
+from tqdm import tqdm
 
 class BaseMetric:
     @abstractmethod
@@ -676,10 +677,22 @@ class ExactMatchMetric(BaseMetric):
     ) -> Tuple[List[float], float]:
 
         all_scores = []
-        for prompt_text, ref_texts in zip(prompt_texts, reference_texts):
-            model_answer = self._qa_model.generate_answer(prompt_text)
-            score = 1 if check_answer_truthfulness(model_answer, ref_texts) else 0
-            all_scores.append(score)
+        batch_size = 50
+        n = len(generated_texts)
+        start = 0
+        end = min(start+batch_size, n)
+
+        while start < end:        
+            batch_prompt_text = generated_texts[start:end]
+            batch_ref_texts = reference_texts[start:end]
+            model_answers = self._qa_model.generate_answer(batch_prompt_text)
+
+            for answer, ref_texts in zip(model_answers, batch_ref_texts):
+                score = 1 if check_answer_truthfulness(answer, ref_texts) else 0
+                all_scores.append(score)
+
+            start += batch_size
+            end = min(start+batch_size, n)
 
         metric_dict = {"semantic/exact_match": (all_scores, np.mean(all_scores))}
         return metric_dict

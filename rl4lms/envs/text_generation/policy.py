@@ -361,12 +361,12 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy):
     def _build_model_heads(self,
                            model_name: str):
         self._policy_model = T5EncoderModel.from_pretrained(
-            model_name)
+            model_name).cuda()
         self._policy_model.__class__ = override_generation_routines(
             type(self._policy_model))
 
         self._value_model = T5EncoderModel.from_pretrained(
-            model_name)
+            model_name).cuda()
         self._ref_model = deepcopy(self._policy_model).eval()
 
         self._value_head = nn.Linear(
@@ -380,9 +380,9 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy):
                 self._value_model.parallelize()
                 self._value_head = self._value_head.to(self.device)
             else: # else defaults to data parallel
-                self._policy_model = torch.nn.DataParallel(self._policy_model)
-                self._ref_model = torch.nn.DataParallel(self._ref_model)
-                self._value_model = torch.nn.DataParallel(self._value_model)
+                self._policy_model = torch.nn.DataParallel(self._policy_model.to('cuda'))
+                self._ref_model = torch.nn.DataParallel(self._ref_model.to('cuda'))
+                self._value_model = torch.nn.DataParallel(self._value_model.to('cuda'))
                 self._value_head = torch.nn.DataParallel(self._value_head.to(self.device))
 
 

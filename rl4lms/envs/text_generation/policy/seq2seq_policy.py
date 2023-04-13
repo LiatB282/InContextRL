@@ -79,12 +79,12 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         self.load_from_dict(state_dict)
 
     def _build_model_heads(self, model_name: str):
-        self._policy_model = T5EncoderModel.from_pretrained(model_name)
+        self._policy_model = T5EncoderModel.from_pretrained(model_name).cuda()
         # self._policy_model.__class__ = override_generation_routines(
         #     type(self._policy_model)
         # )
 
-        self._value_model = T5EncoderModel.from_pretrained(model_name)
+        self._value_model = T5EncoderModel.from_pretrained(model_name).cuda()
         self._ref_model = deepcopy(self._policy_model).eval()
 
         self._value_head = nn.Linear(
@@ -200,7 +200,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
                     input_ids_list.append(new_input_ids)  
 
 
-                rand_docs_data_and_vectors = retriever.get_random_docs(100, current_ids + current_top_ids)
+                rand_docs_data_and_vectors = retriever.get_random_docs(1000, current_ids + current_top_ids)
                 rand_docs_vectors_list.append([d[1] for d in rand_docs_data_and_vectors])
                 rand_docs_ids_list.append([d[0][0] for d in rand_docs_data_and_vectors])
                 top_docs_vectors_list.append(retriever.get_embeds_from_docs_ids(current_top_ids)) #check
@@ -274,7 +274,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
             encodings = tokenizer(
                 texts,
                 padding="max_length",
-                max_length=500,
+                max_length=700,
                 return_tensors="pt",
                 return_attention_mask=True,
                 truncation=True,
@@ -367,7 +367,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
 
         embeddings = torch.nn.functional.normalize(embeddings, dim=1)
         
-        scores = torch.bmm(embeddings.unsqueeze(1), doc_embeds.transpose(1,2).float()).squeeze(1)
+        scores = torch.bmm(embeddings.unsqueeze(1), doc_embeds.transpose(1,2).float()).squeeze(1).float()
 
         # get log probs
         dist = self._action_dist.proba_distribution(action_logits=scores)
@@ -485,7 +485,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
         self, obs: torch.Tensor, actions: torch.Tensor, actions_idx: torch.Tensor, embeds: torch.Tensor
     ) -> EvaluateActionsOutput:
 
-        policy_outputs = self.forward_policy(obs=obs, actions=actions, actions_idx=actions_idx, doc_embeds=embeds.reshape(-1, 200, 768))
+        policy_outputs = self.forward_policy(obs=obs, actions=actions, actions_idx=actions_idx, doc_embeds=embeds.reshape(-1, 1100, 768))
         value_outputs = self.forward_value(obs)
 
         eval_outputs = EvaluateActionsOutput(

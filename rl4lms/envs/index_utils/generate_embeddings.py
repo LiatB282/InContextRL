@@ -15,7 +15,7 @@ import re
 import sys
 from sentence_transformers import SentenceTransformer
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, T5EncoderModel
 from InstructorEmbedding import INSTRUCTOR
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -51,6 +51,12 @@ def load_base_model_embeddings(base_model_embeds_dir):
 
         return id_to_embed
 
+def mean_pooling(model_output, attention_mask):
+    token_embeddings = model_output[0] #First element of model_output contains all token embeddings
+    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+
+
 def gen_ctx_vectors(
     ctx_rows,
     batch_size,
@@ -77,14 +83,19 @@ def gen_ctx_vectors(
         batch_ids, batch_inputs = zip(*batch_rows)
         batch_ids = list(batch_ids)
 
+        model_input = tokenizer.batch_encode_plus(list(batch_inputs), return_tensors="pt", padding='longest', max_length=512).to('cuda')#['input_ids'].squeeze(0)
+
+
         if is_instructor:
             instruction = "Represent the question answering example:"
             encodings = model.encode([[instruction,sentence] for sentence in batch_inputs])
         else:
-            encodings = model.encode(batch_inputs)
+            with torch.no_grad():
+                outputs = model(**model_input)
+            encodings = mean_pooling(outputs, model_input['attention_mask'])
 
-        encodings = torch.from_numpy(encodings)
-        tokenized = tokenizer.batch_encode_plus(list(batch_inputs), return_tensors="pt", padding='longest', max_length=512)['input_ids'].squeeze(0)
+        tokenized = model_input['input_ids'].squeeze(0)
+        #encodings = torch.from_numpy(encodings)
 
         out = torch.nn.functional.normalize(encodings, dim=1)
         out = out.cpu()
@@ -124,7 +135,8 @@ def main(args):
         if args.use_instructor:
             model = INSTRUCTOR('hkunlp/instructor-base')
         else:
-            model = SentenceTransformer(args.model_name, cache_folder=args.cache_dir).to(args.device)
+            #model = SentenceTransformer(args.model_name, cache_folder=args.cache_dir).to(args.device)
+            model = T5EncoderModel.from_pretrained(args.model_name, cache_dir=args.cache_dir).to(args.device)
         
         model.eval()
         tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir="/home/gamir/liat/cache")

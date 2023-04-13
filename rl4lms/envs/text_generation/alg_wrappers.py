@@ -111,7 +111,8 @@ def wrap_onpolicy_alg(
     tracker: Tracker,
     target_kl: float = None,
     norm_reward: bool = False,
-    retriever: DenseRetriever = None
+    retriever: DenseRetriever = None,
+    reward_fn: RewardFunction = None
 ):
     class OnPolicyAlgText(alg_class, OnPolicyWarmStartMixin):
         def __init__(
@@ -121,7 +122,8 @@ def wrap_onpolicy_alg(
             tracker: Tracker,
             target_kl: float = None,
             norm_reward: bool = False,
-            retriever: DenseRetriever = None
+            retriever: DenseRetriever = None,
+            reward_fn: RewardFunction = None
         ):
             alg_kwargs["tracker"] = tracker
             super().__init__(**alg_kwargs)
@@ -139,6 +141,7 @@ def wrap_onpolicy_alg(
                 n_envs=1,
             )
             #self.reward_fn = self.env.get_attr("reward_function", 0)[0]
+            self.reward_fn = reward_fn
             self._retriever = retriever
 
         def get_policy_kwargs(
@@ -273,7 +276,9 @@ def wrap_onpolicy_alg(
                 self.num_timesteps += self.env.num_envs
 
                 # compute total rewards
-                total_rewards = rewards + kl_rewards.cpu().numpy()
+                #total_rewards = rewards + kl_rewards.cpu().numpy()
+                # Will override that later
+                total_rewards = kl_rewards.cpu().numpy()
 
                 # unpack individual observations
                 unpacked_obs = unpack_observations(obs_tensor, self.env.num_envs)
@@ -323,6 +328,8 @@ def wrap_onpolicy_alg(
             # if the reward function is batchable, we override the rewards here
             # if isinstance(self.reward_fn, BatchedRewardFunction):
             #     compute_batched_rewards(episode_wise_transitions, self.reward_fn)
+
+            compute_batched_rewards(episode_wise_transitions, self.reward_fn)
 
             advantages_computed = False
             for ep_ix, transitions in enumerate(episode_wise_transitions):
@@ -445,5 +452,5 @@ def wrap_onpolicy_alg(
             return True
 
     # instantiate the wrapped alg
-    alg = OnPolicyAlgText(alg_kwargs, kl_coeff, tracker, target_kl, norm_reward, retriever)
+    alg = OnPolicyAlgText(alg_kwargs, kl_coeff, tracker, target_kl, norm_reward, retriever, reward_fn)
     return alg

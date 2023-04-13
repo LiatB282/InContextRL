@@ -107,7 +107,7 @@ class PPO(OnPolicyAlgorithm):
         policy_kwargs: Optional[Dict[str, Any]] = None,
         verbose: int = 0,
         seed: Optional[int] = None,
-        device: Union[th.device, str] = "auto",
+        device: Union[th.device, str] = "cuda",
         _init_setup_model: bool = True,
         qa_model_name: str = None
     ):

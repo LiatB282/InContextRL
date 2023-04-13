@@ -79,7 +79,7 @@ class SummaCImager:
         self.cache_folder = "/export/share/plaban/summac_cache/"
 
         self.max_doc_sents = max_doc_sents
-        self.max_input_length = 500
+        self.max_input_length = 700
         self.device = "cuda"
         self.cache = {}
         self.model = None  # Lazy loader
