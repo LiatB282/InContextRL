@@ -182,7 +182,7 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
         self.load_trainer_state(self._tracker)
 
         # build components
-        qa_model = GeneralQAModel(self._on_policy_alg_config['args']['qa_model_name'])
+        qa_model = None#GeneralQAModel(self._on_policy_alg_config['args']['qa_model_name'])
         self._tokenizer = build_tokenizer(self._tokenizer_config)
         self._reward_fn = build_reward_fn(self._reward_config, qa_model)
         self._metrics = build_metrics(
@@ -193,7 +193,8 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
         self._env = None
         self._env = build_env(self._env_config, DummyRewardFunction(),
                               self._tokenizer, self._samples_by_split["train"],
-                              self._retriever)
+                              None#self._retriever
+                              )
         self._alg = build_alg(self._on_policy_alg_config,
                               self._env, self._tracker,
                               self._policy_state_dict,
@@ -237,32 +238,32 @@ class OnPolicyTrainer(TrainerWarmStartMixin):
         iter_start = self._trainer_state["current_iter"]
         self._evaluate_on_datapools(epoch=iter_start)
 
-        # train for given number of iters
-        for epoch in range(iter_start, self._n_iters):
-            logger.info(f"TrainingUtils: epoch {epoch} / {self._n_iters}")
+        # # train for given number of iters
+        # for epoch in range(iter_start, self._n_iters):
+        #     logger.info(f"TrainingUtils: epoch {epoch} / {self._n_iters}")
 
-            # current state
-            self._trainer_state["current_iter"] = epoch
+        #     # current state
+        #     self._trainer_state["current_iter"] = epoch
 
-            # inner rollout and learn loop for on-policy algorithm
-            self._alg.learn(self._n_steps_per_iter)
+        #     # inner rollout and learn loop for on-policy algorithm
+        #     self._alg.learn(self._n_steps_per_iter)
 
-            # save the policy checkpoint
-            if (epoch + 1) % self._train_eval_config.get("save_every", 20) == 0:
-                self.save_trainer_state(
-                    self._tracker, self._alg.policy, self._trainer_state)
+        #     # save the policy checkpoint
+        #     if (epoch + 1) % self._train_eval_config.get("save_every", 20) == 0:
+        #         self.save_trainer_state(
+        #             self._tracker, self._alg.policy, self._trainer_state)
 
-            # evaluate on val set in the given intervals
-            # if (epoch + 1) % self._train_eval_config["eval_every"] == 0:
-            #     self._evaluate_on_datapools(epoch=epoch, splits=["val"])
+        #     # evaluate on val set in the given intervals
+        #     # if (epoch + 1) % self._train_eval_config["eval_every"] == 0:
+        #     #     self._evaluate_on_datapools(epoch=epoch, splits=["val"])
 
-        # finally evaluate on val and test samples
-        self._evaluate_on_datapools(epoch=epoch)
+        # # finally evaluate on val and test samples
+        # self._evaluate_on_datapools(epoch=epoch)
 
-        # save model here - we save only the language model
-        if self._tracker is not None:
-            self._tracker.save_auto_model(
-                self._alg.policy.get_language_model())
+        # # save model here - we save only the language model
+        # if self._tracker is not None:
+        #     self._tracker.save_auto_model(
+        #         self._alg.policy.get_language_model())
 
 
 class SupervisedTrainer:

@@ -8,7 +8,7 @@ from rl4lms.data_pools.custom_text_generation_pools import Sample
 from rl4lms.envs.text_generation.logging_utils import Tracker
 from rl4lms.envs.text_generation.metric import BaseMetric
 from index_utils.retriever import DenseRetriever
-
+import os
 
 def get_batch(samples: List[Sample], batch_size: int):
     current_ix = 0
@@ -39,17 +39,33 @@ def evaluate_on_samples(
     all_prompt_texts = []
     all_meta_infos = []
     n_samples = len(samples)
+
+    file_path = f"/home/gamir/liat/InContextRL/IN_CONTEXT_RL/seven_{split_name}.txt"
+    result_exists = False
+    if os.path.exists(file_path):
+        result_exists = True
+        # Open the file in read mode
+        with open(file_path, "r") as file:
+            # Use readlines() to get a list of lines
+            all_generated_texts = file.readlines()
+
     for batch in tqdm(list(get_batch(samples, batch_size)), desc="Evaluating"):
-        batch_generated_texts = generate_text(
-            policy, tokenizer, batch, max_prompt_length, dt_control_token, gen_kwargs, retriever
-        )
+        if not result_exists:
+            batch_generated_texts = generate_text(
+                policy, tokenizer, batch, max_prompt_length, dt_control_token, gen_kwargs, retriever, split_name
+            )
+            all_generated_texts.extend(batch_generated_texts)
+
         batch_ref_texts = [sample.references for sample in batch]
         batch_prompt_texts = [sample.prompt_or_input_text for sample in batch]
         batch_meta_infos = [sample.meta_data for sample in batch]
-        all_generated_texts.extend(batch_generated_texts)
         all_ref_texts.extend(batch_ref_texts)
         all_prompt_texts.extend(batch_prompt_texts)
         all_meta_infos.extend(batch_meta_infos)
+
+    with open(file_path, 'w') as file:
+        for text in all_generated_texts:
+            file.write(text.strip() + "\n")
 
     # compute metrics
     corpus_level_metrics = {}
@@ -106,7 +122,8 @@ def generate_text(
     max_prompt_length: int,
     dt_control_token: str,
     gen_kwargs: Dict[str, Any],
-    retriever: DenseRetriever
+    retriever: DenseRetriever,
+    split_name: str
 ):
     prompt_texts = [
         dt_control_token + sample.prompt_or_input_text for sample in samples
@@ -115,4 +132,5 @@ def generate_text(
     generated_texts = policy.generate(
         tokenizer, prompt_texts, query_ids, 10, None, gen_kwargs=gen_kwargs, retriever=retriever
     ).gen_texts
+
     return generated_texts

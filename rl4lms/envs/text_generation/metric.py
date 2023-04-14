@@ -19,6 +19,15 @@ import rouge
 from rl4lms.qa_models.evaluation import check_answer_truthfulness
 from rl4lms.qa_models.general_qa_model import GeneralQAModel
 from tqdm import tqdm
+import logging
+import json
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+if logger.hasHandlers():
+    logger.handlers.clear()
+console = logging.StreamHandler()
+logger.addHandler(console)
 
 class BaseMetric:
     @abstractmethod
@@ -675,24 +684,36 @@ class ExactMatchMetric(BaseMetric):
         model: PreTrainedModel = None,
         split_name: str = None,
     ) -> Tuple[List[float], float]:
+        if self._qa_model is None:
+            self._qa_model = GeneralQAModel('EleutherAI/gpt-j-6B')
 
         all_scores = []
-        batch_size = 50
+        batch_size = 6
         n = len(generated_texts)
         start = 0
         end = min(start+batch_size, n)
+        i = 0
 
-        while start < end:        
-            batch_prompt_text = generated_texts[start:end]
-            batch_ref_texts = reference_texts[start:end]
-            model_answers = self._qa_model.generate_answer(batch_prompt_text)
+        file_path = f"/home/gamir/liat/InContextRL/IN_CONTEXT_RL/seven_answers_{split_name}.jsonl"
+        with open(file_path, 'w') as f:
+            while start < end:
+                batch_prompt_text = generated_texts[start:end]
+                batch_ref_texts = reference_texts[start:end]
+                model_answers = self._qa_model.generate_answer(batch_prompt_text)
 
-            for answer, ref_texts in zip(model_answers, batch_ref_texts):
-                score = 1 if check_answer_truthfulness(answer, ref_texts) else 0
-                all_scores.append(score)
+                for answer, ref_texts in zip(model_answers, batch_ref_texts):
+                    if i % 100 == 0:
+                        logger.info(f"Step {start} / {n}. Answer: {answer}, Refs: {ref_texts}")
+                    score = 1 if check_answer_truthfulness(answer, ref_texts) else 0
+                    all_scores.append(score)
+                    item = { 'score': score, 'model_answer': answer, 'gold_answers': ref_texts }
+                    json.dump(item, f)
+                    f.write('\n')
+                    i += 1
 
-            start += batch_size
-            end = min(start+batch_size, n)
+                start += batch_size
+                end = min(start+batch_size, n)
+                
 
         metric_dict = {"semantic/exact_match": (all_scores, np.mean(all_scores))}
         return metric_dict

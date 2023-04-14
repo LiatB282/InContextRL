@@ -157,7 +157,7 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
 
             for i in range(batch_size):
                 # TODO: make this true
-                if top_queries[i][0][0][0] == 0 and not finished[i]:
+                if not finished[i] and top_queries[i][0][0][0] == 0:
                     finished[i] = True
                     finished_counter += 1
 
@@ -168,72 +168,78 @@ class Seq2SeqLMActorCriticPolicy(LMActorCriticPolicy, ActorCriticWarmStartMixin)
                 counter = 0
                 query_input_ids = None
 
-                # Choosing the real top-100 filtering used queries
-                for j, q in enumerate(top_queries[i][0]):
-                    id = q[0]
-                    if id in actions[i] or id in used_ids[i]:
-                        continue
+                if finished[i]:
+                    query_id = 0
+                    query_input_ids = torch.zeros(1)
+                else:
+                    # Choosing the real top-100 filtering used queries
+                    for j, q in enumerate(top_queries[i][0]):
+                        id = q[0]
+                        if id in actions[i] or id in used_ids[i]:
+                            continue
 
-                    if query_input_ids is None:
-                        query_input_ids = q[1]
-                    
-                    score = top_queries[i][1][j]
-                    current_scores.append(score)
-                    current_top_ids.append(id)
-                    counter += 1
-                    if counter == max_top_queries:
-                        break
+                        if query_input_ids is None:
+                            query_input_ids = q[1]
+                        
+                        score = top_queries[i][1][j]
+                        current_scores.append(score)
+                        current_top_ids.append(id)
+                        counter += 1
+                        if counter == max_top_queries:
+                            break
 
-                top_docs_ids_list.append(current_top_ids)
-                top_scores_list.append(current_scores)
+                    top_docs_ids_list.append(current_top_ids)
+                    top_scores_list.append(current_scores)
 
-                query_id = current_top_ids[0]
+                    query_id = current_top_ids[0]
 
-                actions[i].append(current_top_ids[0])
+                actions[i].append(query_id)  
+                current_ids.append(query_id)
                 
-                if not finished[i]:
-                    current_ids.append(query_id)
+                if finished[i]:
+                    new_input_ids = input_ids[i]
+                else:
                     query_input_ids = torch.masked_select(query_input_ids, query_input_ids != 0)
                     query_input_ids[-1] = 1713
                     current_input_ids = torch.masked_select(input_ids[i], input_ids[i] != 0)
                     new_input_ids = torch.cat([query_input_ids.cuda(), current_input_ids], dim=0)
-                    input_ids_list.append(new_input_ids)  
+                input_ids_list.append(new_input_ids)  
 
 
-                rand_docs_data_and_vectors = retriever.get_random_docs(1000, current_ids + current_top_ids)
-                rand_docs_vectors_list.append([d[1] for d in rand_docs_data_and_vectors])
-                rand_docs_ids_list.append([d[0][0] for d in rand_docs_data_and_vectors])
-                top_docs_vectors_list.append(retriever.get_embeds_from_docs_ids(current_top_ids)) #check
+            #     rand_docs_data_and_vectors = retriever.get_random_docs(1000, current_ids + current_top_ids)
+            #     rand_docs_vectors_list.append([d[1] for d in rand_docs_data_and_vectors])
+            #     rand_docs_ids_list.append([d[0][0] for d in rand_docs_data_and_vectors])
+            #     top_docs_vectors_list.append(retriever.get_embeds_from_docs_ids(current_top_ids)) #check
 
-            rand_docs_tensor = torch.tensor(numpy.array(rand_docs_vectors_list, dtype=numpy.float32), device=input_ids.device)
-            top_docs_tensor = torch.tensor(numpy.array(top_docs_vectors_list, dtype=numpy.float32), device=input_ids.device)
+            # rand_docs_tensor = torch.tensor(numpy.array(rand_docs_vectors_list, dtype=numpy.float32), device=input_ids.device)
+            # top_docs_tensor = torch.tensor(numpy.array(top_docs_vectors_list, dtype=numpy.float32), device=input_ids.device)
 
-            rand_docs_scores = torch.bmm(embeddings.unsqueeze(1), rand_docs_tensor.transpose(1,2)).squeeze(1)
+            # rand_docs_scores = torch.bmm(embeddings.unsqueeze(1), rand_docs_tensor.transpose(1,2)).squeeze(1)
 
-            top_scores_tensor = torch.tensor(top_scores_list, device=input_ids.device)
-            all_scores = torch.cat([rand_docs_scores, top_scores_tensor], dim=1) 
-            all_actions = [l1 + l2 for l1, l2 in zip(rand_docs_ids_list, top_docs_ids_list)]
-            all_actions = torch.tensor(all_actions, device=input_ids.device)
-            all_vectors = torch.cat([rand_docs_tensor, top_docs_tensor], dim=1)
+            # top_scores_tensor = torch.tensor(top_scores_list, device=input_ids.device)
+            # all_scores = torch.cat([rand_docs_scores, top_scores_tensor], dim=1) 
+            # all_actions = [l1 + l2 for l1, l2 in zip(rand_docs_ids_list, top_docs_ids_list)]
+            # all_actions = torch.tensor(all_actions, device=input_ids.device)
+            # all_vectors = torch.cat([rand_docs_tensor, top_docs_tensor], dim=1)
 
             input_ids = torch.nn.utils.rnn.pad_sequence(input_ids_list, batch_first=True)
             attention_mask = input_ids != tokenizer.pad_token_id    
 
-            # all_logprobs = torch.log_softmax(all_scores, dim=1)
-            # logprobs, current_actions_indices = torch.max(all_logprobs, dim=1)
-            # current_actions = torch.gather(all_actions, current_actions_indices, dim=1)
-            # step_wise_logprobs.append(logprobs)
-            # step_wise_actions.append(current_actions)
-            all_doc_ids.append(all_actions)
-            all_doc_embeds.append(all_vectors)
+            # # all_logprobs = torch.log_softmax(all_scores, dim=1)
+            # # logprobs, current_actions_indices = torch.max(all_logprobs, dim=1)
+            # # current_actions = torch.gather(all_actions, current_actions_indices, dim=1)
+            # # step_wise_logprobs.append(logprobs)
+            # # step_wise_actions.append(current_actions)
+            # all_doc_ids.append(all_actions)
+            # all_doc_embeds.append(all_vectors)
 
-            actions_idx_at_step = torch.argmax(all_scores, dim=1)
-            distribution = Categorical(logits=all_scores)
-            log_probs = distribution.log_prob(actions_idx_at_step)
-            step_wise_logprobs.append(log_probs)
-            actions_at_step = torch.gather(all_actions, 1, actions_idx_at_step.unsqueeze(1)).squeeze(1)
-            step_wise_actions.append(actions_at_step)
-            step_wise_actions_idx.append(actions_idx_at_step)
+            # actions_idx_at_step = torch.argmax(all_scores, dim=1)
+            # distribution = Categorical(logits=all_scores)
+            # log_probs = distribution.log_prob(actions_idx_at_step)
+            # step_wise_logprobs.append(log_probs)
+            # actions_at_step = torch.gather(all_actions, 1, actions_idx_at_step.unsqueeze(1)).squeeze(1)
+            # step_wise_actions.append(actions_at_step)
+            # step_wise_actions_idx.append(actions_idx_at_step)
 
         texts = tokenizer.batch_decode(input_ids, skip_special_tokens=True)
         logger.info(f"Generated text = {texts[0]}")
