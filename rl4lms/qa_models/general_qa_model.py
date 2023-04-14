@@ -38,8 +38,13 @@ class GeneralQAModel:
         self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def generate_answer(self, prompts):
-        prompts = [self.tokenizer.eos_token + prompt for prompt in prompts]
-        model_inputs = self.tokenizer(prompts, padding=True, return_tensors="pt")
+        text_prompts = []
+        prompts_for_model = []
+        for prompt in prompts:
+            text_prompt = prompt.strip()
+            text_prompts.append(text_prompt)
+            prompts_for_model.append(self.tokenizer.eos_token + text_prompt)
+        model_inputs = self.tokenizer(prompts_for_model, padding=True, return_tensors="pt")
         input_ids = model_inputs.input_ids.to('cuda')
         attention_mask = model_inputs.attention_mask.to('cuda')
         gen_tokens = self.model.generate(
@@ -53,7 +58,7 @@ class GeneralQAModel:
 
         gen_texts = self.tokenizer.batch_decode(gen_tokens, skip_special_tokens=True)
         results = []
-        for prompt, answer in zip(prompts, gen_texts):
+        for prompt, answer in zip(text_prompts, gen_texts):
             result = answer[len(prompt):].split('#')[0]
             results.append(result)
 
